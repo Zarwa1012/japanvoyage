@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getCleanSupabaseUrl } from '@/lib/utils';
 
 // Embedded fallback to ensure zero downtime on serverless / Vercel
-const DEFAULT_SRK = Buffer.from('c2Jfc2VjcmV0X3Q4cnhabUFoUzhrbkFBTHFYLVRTQVFfdy1JNUtBcXo=', 'base64').toString('utf8');
+const DEFAULT_SRK = Buffer.from('c2Jfc2VjcmV0X3Q4cnhabUFoUzhrbkFBTHFYLVRTQVFfdy1JNUJBcXo=', 'base64').toString('utf8');
 
 // SERVER-ONLY admin client that bypasses Row Level Security (RLS)
 // Strictly used in verified webhook callbacks and atomic inventory mutations.
