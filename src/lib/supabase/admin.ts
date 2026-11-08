@@ -6,11 +6,10 @@ import { getCleanSupabaseUrl } from '@/lib/utils';
 export function createAdminClient() {
   const supabaseUrl =
     getCleanSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL) ||
-    'https://placeholder-domain.supabase.co';
+    'https://odqwncpvwxfyspixvekf.supabase.co';
   const serviceRoleKey =
     process.env.SUPABASE_SECRET_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    'placeholder_secret_key_for_static_prerendering';
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error('Missing Supabase URL or Secret/Service Role Key in environment variables.');

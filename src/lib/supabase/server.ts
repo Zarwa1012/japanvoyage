@@ -6,11 +6,11 @@ export function createClient() {
   const cookieStore = cookies();
   const supabaseUrl =
     getCleanSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL) ||
-    'https://placeholder-domain.supabase.co';
+    'https://odqwncpvwxfyspixvekf.supabase.co';
   const supabaseAnonKey =
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder_anon_key_for_static_prerendering';
+    'sb_publishable_EUATZdfRNr-kzkBZyrHbCA_r8corwtD';
 
   return createServerClient(
     supabaseUrl,
