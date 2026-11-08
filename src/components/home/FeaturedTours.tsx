@@ -38,7 +38,7 @@ export function FeaturedTours() {
           <div>
             <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-red-600 mb-2">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>GetYourGuide Style Curation</span>
+              <span>Top Rated Japan Curation</span>
             </div>
             <h2 className="text-3xl sm:text-4xl font-black text-slate-950 tracking-tight">
               Featured Japan Inbound Excursions

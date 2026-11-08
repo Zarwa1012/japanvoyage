@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { MockTour } from '@/data/mockTours';
 import { useCurrency } from '@/context/CurrencyContext';
+import { useAuth } from '@/context/AuthContext';
 import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
 import { PAKISTANI_PAYMENT_METHODS } from '@/config/paymentMethods';
 
@@ -67,19 +68,32 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
   // Booking Form State
   const [travelDate, setTravelDate] = useState(initialDate);
   const [selectedOptionId, setSelectedOptionId] = useState(initialOptionId);
+  const { user, profile } = useAuth();
   const [adults, setAdults] = useState(isNaN(initialAdults) || initialAdults < 1 ? 1 : initialAdults);
   const [children, setChildren] = useState(isNaN(initialChildren) || initialChildren < 0 ? 0 : initialChildren);
 
-  // Lead Traveler Info State
+  // Lead Traveler Info State (clean initial state, no dummy values)
   const [leadTraveler, setLeadTraveler] = useState({
-    firstName: 'Alex',
-    lastName: 'Mercer',
-    email: 'traveler@example.com',
+    firstName: '',
+    lastName: '',
+    email: '',
     countryCode: '+92',
-    phoneNumber: '0300-1234567',
+    phoneNumber: '',
     nationality: 'Pakistan',
     specialRequests: '',
   });
+
+  // Pre-fill from authenticated user profile if signed in
+  useEffect(() => {
+    if (user || profile) {
+      setLeadTraveler((prev) => ({
+        ...prev,
+        firstName: prev.firstName || profile?.full_name?.split(' ')[0] || '',
+        lastName: prev.lastName || profile?.full_name?.split(' ').slice(1).join(' ') || '',
+        email: prev.email || user?.email || '',
+      }));
+    }
+  }, [user, profile]);
 
   // Selected Payment Method: Focused exclusively on Pakistani methods + Card (Coming Soon)
   const [paymentMethod, setPaymentMethod] = useState<'easypaisa' | 'jazzcash' | 'raast' | 'card'>('easypaisa');
@@ -906,6 +920,7 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                         type="text"
                         value={leadTraveler.firstName}
                         onChange={(e) => setLeadTraveler({ ...leadTraveler, firstName: e.target.value })}
+                        placeholder="e.g. Tariq"
                         required
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
                       />
@@ -917,6 +932,7 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                         type="text"
                         value={leadTraveler.lastName}
                         onChange={(e) => setLeadTraveler({ ...leadTraveler, lastName: e.target.value })}
+                        placeholder="e.g. Khan"
                         required
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
                       />
@@ -928,6 +944,7 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                         type="email"
                         value={leadTraveler.email}
                         onChange={(e) => setLeadTraveler({ ...leadTraveler, email: e.target.value })}
+                        placeholder="e.g. name@email.com"
                         required
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
                       />
@@ -939,6 +956,7 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                         type="tel"
                         value={leadTraveler.phoneNumber}
                         onChange={(e) => setLeadTraveler({ ...leadTraveler, phoneNumber: e.target.value })}
+                        placeholder="e.g. 0324-1234567"
                         required
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
                       />

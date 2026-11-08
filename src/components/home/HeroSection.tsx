@@ -26,7 +26,7 @@ export function HeroSection() {
         {/* Top Tag Pill */}
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-xs font-bold mb-6 backdrop-blur-sm">
           <Sparkles className="w-4 h-4 text-amber-400" />
-          <span>Curated Inbound Japan Day Trips • GetYourGuide Quality Standards</span>
+          <span>Curated Inbound Japan Day Trips • Verified Quality Standards</span>
         </div>
 
         {/* Main Heading */}

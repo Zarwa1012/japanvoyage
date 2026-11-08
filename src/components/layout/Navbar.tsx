@@ -51,7 +51,7 @@ export function Navbar() {
         <div className="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5 text-red-400 font-semibold tracking-wide">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Inspired by GetYourGuide
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Official Japan Voyage Tours
             </span>
             <span className="hidden sm:inline text-slate-600">|</span>
             <span className="hidden sm:flex items-center gap-1.5 text-emerald-400 font-medium">
