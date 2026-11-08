@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="50%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#090d16" />
+    </linearGradient>
+    <linearGradient id="red" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#dc2626" />
+      <stop offset="100%" stop-color="#991b1b" />
+    </linearGradient>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg)" />
+  <!-- Sun / Emblem -->
+  <circle cx="400" cy="210" r="90" fill="url(#red)" opacity="0.9" />
+  <!-- Japanese Torii Gate Silhouette -->
+  <path d="M280 280 L520 280 L510 295 L490 295 L490 380 L460 380 L460 295 L340 295 L340 380 L310 380 L310 295 L290 295 Z" fill="#ffffff" opacity="0.95" />
+  <path d="M260 250 Q400 230 540 250 L530 268 Q400 252 270 268 Z" fill="#ffffff" opacity="0.95" />
+  <!-- Text Brand -->
+  <text x="400" y="420" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="28" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="2">
+    JAPAN<tspan fill="#ef4444">VOYAGE</tspan>
+  </text>
+  <text x="400" y="450" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="#94a3b8" text-anchor="middle" letter-spacing="1">
+    AUTHENTIC INBOUND EXCURSION
+  </text>
+</svg>

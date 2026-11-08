@@ -1,0 +1,1205 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { 
+  ShieldCheck, 
+  CreditCard, 
+  Lock, 
+  CheckCircle, 
+  Clock, 
+  Users, 
+  ChevronRight, 
+  Calendar, 
+  MapPin, 
+  Sparkles, 
+  QrCode, 
+  Download, 
+  ArrowLeft,
+  AlertCircle,
+  Timer,
+  Copy,
+  Check,
+  Upload,
+  FileCheck,
+  FileText,
+  Building2,
+  PhoneCall,
+  User,
+  Info
+} from 'lucide-react';
+import { MockTour } from '@/data/mockTours';
+import { useCurrency } from '@/context/CurrencyContext';
+import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
+import { PAKISTANI_PAYMENT_METHODS } from '@/config/paymentMethods';
+
+interface BookingFlowClientProps {
+  tour: MockTour;
+}
+
+interface BookingHoldData {
+  id: string;
+  reference: string;
+  status: string;
+  expiresAt: string;
+  chargedAmount: number;
+  chargedCurrency: string;
+  totalBaseJpy: number;
+}
+
+export function BookingFlowClient({ tour }: BookingFlowClientProps) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const { formatPrice, currency } = useCurrency();
+
+  // Get initial values from URL query if present
+  const initialDate = searchParams?.get('date') || (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 2);
+    return d.toISOString().split('T')[0];
+  })();
+
+  const initialOptionId = searchParams?.get('option') || tour.options[0]?.id || 'std';
+  const initialAdults = parseInt(searchParams?.get('adults') || '2', 10);
+  const initialChildren = parseInt(searchParams?.get('children') || '0', 10);
+
+  // Booking Form State
+  const [travelDate, setTravelDate] = useState(initialDate);
+  const [selectedOptionId, setSelectedOptionId] = useState(initialOptionId);
+  const [adults, setAdults] = useState(isNaN(initialAdults) || initialAdults < 1 ? 1 : initialAdults);
+  const [children, setChildren] = useState(isNaN(initialChildren) || initialChildren < 0 ? 0 : initialChildren);
+
+  // Lead Traveler Info State
+  const [leadTraveler, setLeadTraveler] = useState({
+    firstName: 'Alex',
+    lastName: 'Mercer',
+    email: 'traveler@example.com',
+    countryCode: '+92',
+    phoneNumber: '0300-1234567',
+    nationality: 'Pakistan',
+    specialRequests: '',
+  });
+
+  // Selected Payment Method: Focused exclusively on Pakistani methods + Card (Coming Soon)
+  const [paymentMethod, setPaymentMethod] = useState<'easypaisa' | 'jazzcash' | 'raast' | 'card'>('easypaisa');
+
+  // Submission & Hold State
+  const [isSubmittingHold, setIsSubmittingHold] = useState(false);
+  const [holdError, setHoldError] = useState<string | null>(null);
+  const [bookingHold, setBookingHold] = useState<BookingHoldData | null>(null);
+  const [secondsRemaining, setSecondsRemaining] = useState(900); // 15 mins default
+
+  // Manual Verification Form State
+  const [senderName, setSenderName] = useState('');
+  const [senderMobile, setSenderMobile] = useState('');
+  const [transactionId, setTransactionId] = useState('');
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [isReceiptPdf, setIsReceiptPdf] = useState(false);
+  const [proofImageBase64, setProofImageBase64] = useState<string | null>(null);
+  const [proofFileName, setProofFileName] = useState<string | null>(null);
+  const [customerNotes, setCustomerNotes] = useState('');
+  const [isSubmittingProof, setIsSubmittingProof] = useState(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [isVerificationSubmitted, setIsVerificationSubmitted] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Calculations
+  const selectedOption = tour.options.find(o => o.id === selectedOptionId) || tour.options[0];
+  const unitPriceJpy = selectedOption ? selectedOption.priceJpy : tour.priceJpy;
+  const childUnitPriceJpy = Math.round(unitPriceJpy * 0.7);
+  const adultsSubtotalJpy = adults * unitPriceJpy;
+  const childrenSubtotalJpy = children * childUnitPriceJpy;
+  const totalAmountJpy = adultsSubtotalJpy + childrenSubtotalJpy;
+  
+  // PKR equivalent calculation (1 JPY ≈ 1.82 PKR standard rate)
+  const totalAmountPkr = Math.round(totalAmountJpy * 1.82);
+
+  // Countdown timer for seat hold
+  useEffect(() => {
+    if (!bookingHold) return;
+    const interval = setInterval(() => {
+      setSecondsRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setBookingHold(curr => curr ? { ...curr, status: 'expired' } : null);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [bookingHold]);
+
+  const formatCountdown = (totalSecs: number) => {
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleCopy = (text: string, fieldName: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(fieldName);
+    setTimeout(() => setCopiedField(null), 2500);
+  };
+
+  // Handle proof receipt upload (Image or PDF)
+  const handleProofFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedMime = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
+    if (!allowedMime.includes(file.type.toLowerCase())) {
+      setVerificationError('Invalid file format. Please upload an image (PNG, JPG, WEBP) or a PDF receipt document.');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setVerificationError('File size exceeds the 10 MB limit. Please upload a smaller receipt.');
+      return;
+    }
+
+    setReceiptFile(file);
+    setProofFileName(file.name);
+    setVerificationError(null);
+
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    setIsReceiptPdf(isPdf);
+
+    if (!isPdf) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProofImageBase64(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setProofImageBase64(null);
+    }
+  };
+
+  // Step 1: Create Seat Hold and persist booking in database
+  const handleCreateBookingHold = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (paymentMethod === 'card') {
+      alert('Credit/Debit Card gateway integration is currently in progress. Please choose Easypaisa, JazzCash, or Raast.');
+      return;
+    }
+
+    setIsSubmittingHold(true);
+    setHoldError(null);
+
+    const participants = [
+      {
+        tier_type: 'adult',
+        full_name: `${leadTraveler.firstName} ${leadTraveler.lastName}`.trim(),
+        nationality: leadTraveler.nationality || 'Pakistan',
+      },
+    ];
+
+    for (let i = 1; i < adults; i++) {
+      participants.push({
+        tier_type: 'adult',
+        full_name: `Traveler Adult ${i + 1}`,
+        nationality: leadTraveler.nationality || 'Pakistan',
+      });
+    }
+
+    for (let j = 0; j < children; j++) {
+      participants.push({
+        tier_type: 'child',
+        full_name: `Traveler Child ${j + 1}`,
+        nationality: leadTraveler.nationality || 'Pakistan',
+      });
+    }
+
+    try {
+      // Call server API to register seat hold with status 'hold_pending_payment'
+      const res = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tourSlug: tour.slug,
+          tourId: tour.id,
+          optionId: selectedOptionId,
+          travelDate,
+          leadTraveler,
+          participants,
+          paymentMethod,
+          chargedCurrency: 'PKR',
+          chargedAmount: totalAmountPkr,
+          totalBaseJpy: totalAmountJpy,
+          exchangeRate: 1.82,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        throw new Error(json.error || 'Failed to initialize booking hold.');
+      }
+
+      setBookingHold({
+        id: json.booking.id,
+        reference: json.booking.reference,
+        status: 'hold_pending_payment',
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        chargedAmount: totalAmountPkr,
+        chargedCurrency: 'PKR',
+        totalBaseJpy: totalAmountJpy,
+      });
+
+      // Pre-fill sender details
+      setSenderName(`${leadTraveler.firstName} ${leadTraveler.lastName}`.trim());
+      setSenderMobile(leadTraveler.phoneNumber);
+    } catch (err: any) {
+      setHoldError(err.message || 'Could not hold seats. Please try again.');
+    } finally {
+      setIsSubmittingHold(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  // Step 2: Submit Manual Payment Proof for Admin Verification
+  const handleSubmitPaymentProof = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bookingHold) return;
+
+    if (!transactionId.trim()) {
+      setVerificationError('Transaction ID (TRX / TID / Reference number) is required.');
+      return;
+    }
+
+    if (!senderName.trim() || !senderMobile.trim()) {
+      setVerificationError('Sender account name and mobile number are required.');
+      return;
+    }
+
+    setIsSubmittingProof(true);
+    setVerificationError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('bookingId', bookingHold.id);
+      formData.append('bookingReference', bookingHold.reference);
+      formData.append('paymentMethod', paymentMethod);
+      formData.append('transactionId', transactionId.trim());
+      formData.append('senderName', senderName.trim());
+      formData.append('senderMobile', senderMobile.trim());
+      formData.append('amountPkr', totalAmountPkr.toString());
+      if (customerNotes.trim()) {
+        formData.append('customerNotes', customerNotes.trim());
+      }
+      if (receiptFile) {
+        formData.append('receiptFile', receiptFile);
+      } else if (proofImageBase64) {
+        formData.append('receiptFileBase64', proofImageBase64);
+        formData.append('receiptFileName', proofFileName || 'receipt.png');
+      }
+
+      const res = await fetch('/api/payments/submit-manual', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        throw new Error(json.error || 'Failed to submit payment receipt.');
+      }
+
+      setIsVerificationSubmitted(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err: any) {
+      setVerificationError(err.message || 'Error submitting payment verification.');
+    } finally {
+      setIsSubmittingProof(false);
+    }
+  };
+
+  const activePaymentConfig = PAKISTANI_PAYMENT_METHODS[paymentMethod] || PAKISTANI_PAYMENT_METHODS.easypaisa;
+
+  return (
+    <div className="bg-slate-50 min-h-screen pb-24">
+      {/* Top Breadcrumb Banner */}
+      <div className="bg-white border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+          <Link
+            href={`/tours/${tour.slug}`}
+            className="flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-red-600 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Tour Details</span>
+          </Link>
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 font-semibold">
+            <Lock className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Secure Pakistani Payment Gateway & Verification</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-8">
+        
+        {/* ========================================================================= */}
+        {/* VIEW 2: PAYMENT & VERIFICATION SCREEN (ACTIVE ONCE SEATS ARE HELD)       */}
+        {/* ========================================================================= */}
+        {bookingHold ? (
+          <div className="max-w-3xl mx-auto space-y-6">
+            
+            {/* Countdown / Hold Header */}
+            <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl text-center">
+              
+              {isVerificationSubmitted ? (
+                <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-in zoom-in-95">
+                  <Clock className="w-9 h-9 stroke-[2.5]" />
+                </div>
+              ) : (
+                <div className="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Timer className="w-8 h-8 stroke-[2.5]" />
+                </div>
+              )}
+
+              <div className="flex items-center justify-center gap-2">
+                <span className={`text-xs font-extrabold uppercase tracking-widest px-3 py-1 rounded-full ${
+                  isVerificationSubmitted
+                    ? 'text-amber-800 bg-amber-100 border border-amber-300'
+                    : 'text-red-700 bg-red-50 border border-red-200'
+                }`}>
+                  {isVerificationSubmitted ? 'Payment Pending Admin Verification' : 'Seat Hold Active (15 Min)'}
+                </span>
+              </div>
+
+              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
+                {isVerificationSubmitted ? 'Payment Proof Submitted!' : 'Complete Your Payment Transfer'}
+              </h1>
+              
+              <p className="text-xs sm:text-sm text-slate-600 mt-1.5 max-w-lg mx-auto">
+                {isVerificationSubmitted ? (
+                  <>Thank you for submitting your transaction details. Our administrator team will verify your transfer and issue your confirmed tour QR voucher.</>
+                ) : (
+                  <>Seats are temporarily held for booking <strong>{bookingHold.reference}</strong>. Send the exact PKR amount using your selected Pakistani payment method below.</>
+                )}
+              </p>
+
+              {!isVerificationSubmitted && (
+                <div className="mt-4 inline-flex items-center gap-2 bg-amber-50 text-amber-900 px-4 py-2 rounded-xl border border-amber-200 text-xs font-bold">
+                  <Clock className="w-4 h-4 text-amber-600" />
+                  <span>Time Remaining: </span>
+                  <span className="font-mono text-sm font-black text-amber-700">{formatCountdown(secondsRemaining)}</span>
+                </div>
+              )}
+
+              {/* Booking Snapshot */}
+              <div className="mt-6 bg-slate-50 rounded-2xl p-4 sm:p-5 border border-slate-200 text-left grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                <div>
+                  <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Reference</span>
+                  <span className="font-mono text-sm font-black text-red-600">{bookingHold.reference}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Total Amount</span>
+                  <span className="font-black text-sm text-slate-900">Rs {totalAmountPkr.toLocaleString()} PKR</span>
+                  <span className="text-[10px] text-slate-400 block font-normal">({formatPrice(totalAmountJpy)})</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Travel Date</span>
+                  <span className="font-bold text-slate-800">{travelDate}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Travelers</span>
+                  <span className="font-bold text-slate-800">{adults + children} Persons</span>
+                </div>
+              </div>
+            </div>
+
+            {/* If Payment Verification is Already Submitted */}
+            {isVerificationSubmitted ? (
+              <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl space-y-6">
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-start gap-3">
+                  <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-900 space-y-1">
+                    <span className="font-bold block text-sm">Under Review by Administrator</span>
+                    <p>
+                      Your transaction ID <strong>{transactionId}</strong> has been logged. In compliance with security standards, bookings are confirmed only after payment verification by our finance desk (typically within 5 to 15 minutes during business hours).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                  <Link
+                    href="/account"
+                    className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-6 py-3.5 rounded-xl shadow-md transition-all text-center"
+                  >
+                    View in Customer Account
+                  </Link>
+                  <Link
+                    href="/tours"
+                    className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-6 py-3.5 rounded-xl transition-all text-center"
+                  >
+                    Browse More Tours
+                  </Link>
+                </div>
+              </div>
+            ) : (
+
+              /* ========================================================================= */
+              /* PAYMENT INSTRUCTIONS & VERIFICATION SUBMISSION FORM                      */
+              /* ========================================================================= */
+              <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl space-y-8">
+                
+                {/* Method Switcher Tabs */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
+                    Select Transfer Channel:
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['easypaisa', 'jazzcash', 'raast'] as const).map((methodKey) => {
+                      const cfg = PAKISTANI_PAYMENT_METHODS[methodKey];
+                      const isSelected = paymentMethod === methodKey;
+                      return (
+                        <button
+                          key={methodKey}
+                          type="button"
+                          onClick={() => setPaymentMethod(methodKey)}
+                          className={`py-3 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center ${
+                            isSelected
+                              ? 'border-red-600 bg-red-50/60 ring-2 ring-red-600 shadow-sm'
+                              : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                          }`}
+                        >
+                          <span className="font-black text-xs text-slate-900">{cfg.name}</span>
+                          <span className="text-[10px] text-slate-400 block mt-0.5">{cfg.badge}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Account Details Box */}
+                <div className={`p-5 rounded-2xl border ${activePaymentConfig.lightBg} ${activePaymentConfig.borderColor} space-y-4`}>
+                  <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Building2 className={`w-5 h-5 ${activePaymentConfig.textColor}`} />
+                      <span className={`font-black text-sm ${activePaymentConfig.textColor}`}>
+                        {activePaymentConfig.name} Transfer Information
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700">
+                      Official Account
+                    </span>
+                  </div>
+
+                  {/* Account Name */}
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500 font-medium">Account Title:</span>
+                    <span className="font-extrabold text-slate-900">{activePaymentConfig.accountTitle}</span>
+                  </div>
+
+                  {/* Account Number with 1-Click Copy */}
+                  <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase">
+                        {paymentMethod === 'raast' ? 'Raast ID / Alias' : 'Account Number'}
+                      </span>
+                      <span className="font-mono text-base font-black text-slate-900">
+                        {activePaymentConfig.accountNumber}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(activePaymentConfig.accountNumber, 'accNumber')}
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      {copiedField === 'accNumber' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-700">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* IBAN for Raast */}
+                  {activePaymentConfig.iban && (
+                    <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-bold block uppercase">Raast IBAN</span>
+                        <span className="font-mono text-xs font-black text-slate-900 break-all">
+                          {activePaymentConfig.iban}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(activePaymentConfig.iban!, 'iban')}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors shrink-0 ml-2"
+                      >
+                        {copiedField === 'iban' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="text-emerald-700">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copy</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Exact PKR Amount */}
+                  <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Exact Payable Amount</span>
+                      <span className="font-mono text-base font-black text-red-600">
+                        Rs {totalAmountPkr.toLocaleString()} PKR
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(totalAmountPkr.toString(), 'amount')}
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      {copiedField === 'amount' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-700">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Amount</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Step by Step Instructions */}
+                  <div className="text-xs text-slate-700 pt-2 space-y-1.5">
+                    <span className="font-bold text-slate-900 block">How to complete transfer:</span>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-600 pl-1">
+                      {activePaymentConfig.instructions.map((step, idx) => (
+                        <li key={idx} className="leading-relaxed">{step}</li>
+                      ))}
+                    </ol>
+                  </div>
+                </div>
+
+                {/* Verification Form */}
+                <form onSubmit={handleSubmitPaymentProof} className="space-y-4 pt-2 border-t border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-red-600 text-white font-black text-xs flex items-center justify-center">
+                      2
+                    </div>
+                    <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
+                      Submit Your Transaction Verification
+                    </h3>
+                  </div>
+
+                  {verificationError && (
+                    <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                      <span>{verificationError}</span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Sender Full Name */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Sender Account Title / Name <span className="text-red-600">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={senderName}
+                        onChange={(e) => setSenderName(e.target.value)}
+                        placeholder="e.g. Muhammad Ali"
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
+                      />
+                    </div>
+
+                    {/* Sender Mobile Number */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Sender Mobile Number <span className="text-red-600">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={senderMobile}
+                        onChange={(e) => setSenderMobile(e.target.value)}
+                        placeholder="e.g. 0300-1234567"
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Transaction ID */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Transaction ID (TRX ID / TID / Reference Number) <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={transactionId}
+                      onChange={(e) => setTransactionId(e.target.value)}
+                      placeholder="e.g. 23849102941"
+                      required
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 font-mono text-sm font-bold focus:outline-none focus:ring-2 focus:ring-red-600"
+                    />
+                    <span className="text-[11px] text-slate-400 mt-1 block">
+                      Found in your payment SMS receipt or mobile app transfer summary.
+                    </span>
+                  </div>
+
+                  {/* Payment Receipt / Screenshot Upload (Image or PDF) */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Upload Payment Receipt (Image or PDF)
+                    </label>
+                    
+                    <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-slate-200 border-dashed rounded-2xl bg-slate-50 hover:bg-slate-100/70 transition-colors">
+                      <div className="space-y-2 text-center w-full">
+                        {receiptFile || proofImageBase64 ? (
+                          <div className="flex flex-col items-center">
+                            {isReceiptPdf ? (
+                              <div className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 shadow-sm max-w-sm w-full">
+                                <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center shrink-0">
+                                  <FileText className="w-5 h-5 text-red-600" />
+                                </div>
+                                <div className="text-left overflow-hidden">
+                                  <p className="text-xs font-bold text-slate-900 truncate">
+                                    {proofFileName || 'Receipt.pdf'}
+                                  </p>
+                                  <p className="text-[10px] text-slate-500 font-mono">
+                                    PDF Document • {receiptFile ? `${Math.round(receiptFile.size / 1024)} KB` : 'Uploaded'}
+                                  </p>
+                                </div>
+                              </div>
+                            ) : (
+                              proofImageBase64 && (
+                                /* eslint-disable-next-line @next/next/no-img-element */
+                                <img
+                                  src={proofImageBase64}
+                                  alt="Proof preview"
+                                  className="max-h-36 rounded-lg border border-slate-200 shadow-sm mb-2"
+                                />
+                              )
+                            )}
+                            <span className="text-xs font-bold text-emerald-700 flex items-center gap-1 mt-2">
+                              <FileCheck className="w-4 h-4 text-emerald-600" />
+                              {proofFileName || 'Receipt selected'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReceiptFile(null);
+                                setIsReceiptPdf(false);
+                                setProofImageBase64(null);
+                                setProofFileName(null);
+                              }}
+                              className="text-[11px] text-red-600 hover:underline font-bold mt-1"
+                            >
+                              Remove & choose another
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <Upload className="mx-auto h-8 w-8 text-slate-400" />
+                            <div className="flex text-xs text-slate-600 justify-center">
+                              <label
+                                htmlFor="proof-upload"
+                                className="relative cursor-pointer rounded-md font-extrabold text-red-600 hover:text-red-500 focus-within:outline-none"
+                              >
+                                <span>Upload payment screenshot or PDF receipt</span>
+                                <input
+                                  id="proof-upload"
+                                  name="proof-upload"
+                                  type="file"
+                                  accept="image/png, image/jpeg, image/jpg, image/webp, application/pdf"
+                                  onChange={handleProofFileUpload}
+                                  className="sr-only"
+                                />
+                              </label>
+                            </div>
+                            <p className="text-[10px] text-slate-400">PNG, JPG, WEBP, or PDF up to 10MB</p>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Customer Notes */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Additional Notes for Finance Desk (Optional)
+                    </label>
+                    <textarea
+                      value={customerNotes}
+                      onChange={(e) => setCustomerNotes(e.target.value)}
+                      rows={2}
+                      placeholder="e.g. Sent from brother's Easypaisa account at 11:30 PM"
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-red-600"
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <button
+                    type="submit"
+                    disabled={isSubmittingProof}
+                    className="w-full bg-red-600 hover:bg-red-700 active:scale-98 text-white font-extrabold text-xs sm:text-sm py-4 px-6 rounded-xl shadow-lg shadow-red-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {isSubmittingProof ? (
+                      <span>Verifying & Submitting Proof...</span>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>Submit Payment Proof for Verification</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+
+              </div>
+            )}
+
+          </div>
+        ) : (
+
+          /* ========================================================================= */
+          /* VIEW 1: STANDARD CHECKOUT & PARTICIPANT DETAILS FORM                      */
+          /* ========================================================================= */
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            
+            {/* Left 7 Cols: Details, Travelers & Payment */}
+            <div className="lg:col-span-7 space-y-6">
+              
+              <div>
+                <span className="text-xs font-bold text-red-600 uppercase tracking-widest block mb-1">
+                  Pakistan Inbound Tourism Checkout
+                </span>
+                <h1 className="text-2xl sm:text-3xl font-black text-slate-900">
+                  Review & Reserve Your Seats
+                </h1>
+              </div>
+
+              {holdError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-4 rounded-xl flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <span>{holdError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleCreateBookingHold} className="space-y-6">
+                
+                {/* 1. Date & Time Selection */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-red-600 text-white font-black text-xs flex items-center justify-center">
+                      1
+                    </div>
+                    <h2 className="text-base font-bold text-slate-900">
+                      Date & Departure Details
+                    </h2>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Travel Date
+                      </label>
+                      <input
+                        type="date"
+                        value={travelDate}
+                        onChange={(e) => setTravelDate(e.target.value)}
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Departure Option
+                      </label>
+                      <select
+                        value={selectedOptionId}
+                        onChange={(e) => setSelectedOptionId(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
+                      >
+                        {tour.options.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {opt.title} ({opt.departureTime})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Participants Row */}
+                  <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Adults (Age 12+)
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setAdults(Math.max(1, adults - 1))}
+                          className="w-8 h-8 rounded-lg border border-slate-300 font-black text-slate-700 hover:bg-slate-100"
+                        >
+                          -
+                        </button>
+                        <span className="text-sm font-black text-slate-900">{adults}</span>
+                        <button
+                          type="button"
+                          onClick={() => setAdults(adults + 1)}
+                          className="w-8 h-8 rounded-lg border border-slate-300 font-black text-slate-700 hover:bg-slate-100"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Children (Age 4-11)
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setChildren(Math.max(0, children - 1))}
+                          className="w-8 h-8 rounded-lg border border-slate-300 font-black text-slate-700 hover:bg-slate-100"
+                        >
+                          -
+                        </button>
+                        <span className="text-sm font-black text-slate-900">{children}</span>
+                        <button
+                          type="button"
+                          onClick={() => setChildren(children + 1)}
+                          className="w-8 h-8 rounded-lg border border-slate-300 font-black text-slate-700 hover:bg-slate-100"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Lead Traveler Information */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-red-600 text-white font-black text-xs flex items-center justify-center">
+                      2
+                    </div>
+                    <h2 className="text-base font-bold text-slate-900">
+                      Lead Traveler Information
+                    </h2>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">First Name</label>
+                      <input
+                        type="text"
+                        value={leadTraveler.firstName}
+                        onChange={(e) => setLeadTraveler({ ...leadTraveler, firstName: e.target.value })}
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Last Name</label>
+                      <input
+                        type="text"
+                        value={leadTraveler.lastName}
+                        onChange={(e) => setLeadTraveler({ ...leadTraveler, lastName: e.target.value })}
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Email Address</label>
+                      <input
+                        type="email"
+                        value={leadTraveler.email}
+                        onChange={(e) => setLeadTraveler({ ...leadTraveler, email: e.target.value })}
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">WhatsApp / Contact Phone</label>
+                      <input
+                        type="tel"
+                        value={leadTraveler.phoneNumber}
+                        onChange={(e) => setLeadTraveler({ ...leadTraveler, phoneNumber: e.target.value })}
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Special Requirements (Optional)</label>
+                    <textarea
+                      value={leadTraveler.specialRequests}
+                      onChange={(e) => setLeadTraveler({ ...leadTraveler, specialRequests: e.target.value })}
+                      rows={2}
+                      placeholder="Dietary preferences, accessibility requirements, etc."
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-red-600"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Pakistani Payment Method Selection (Safepay Removed) */}
+                <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-red-600 text-white font-black text-xs flex items-center justify-center">
+                      3
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">
+                        Select Payment Method
+                      </h2>
+                      <span className="text-[11px] text-slate-500 font-medium block">
+                        Direct Pakistani payment transfer via mobile wallet or Raast
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    
+                    {/* Easypaisa */}
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('easypaisa')}
+                      className={`p-4 rounded-xl border text-left transition-all flex items-center justify-between ${
+                        paymentMethod === 'easypaisa'
+                          ? 'border-emerald-600 bg-emerald-50/50 ring-2 ring-emerald-600 shadow-sm'
+                          : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white font-black text-sm flex items-center justify-center shadow-sm">
+                          EP
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-extrabold text-xs text-slate-900">Easypaisa</span>
+                            <span className="text-[9px] bg-emerald-100 text-emerald-800 font-extrabold px-1.5 py-0.2 rounded uppercase">
+                              Wallet
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">Mobile Account Transfer</span>
+                        </div>
+                      </div>
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                        paymentMethod === 'easypaisa' ? 'border-emerald-600 bg-emerald-600' : 'border-slate-300'
+                      }`}>
+                        {paymentMethod === 'easypaisa' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                    </button>
+
+                    {/* JazzCash */}
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('jazzcash')}
+                      className={`p-4 rounded-xl border text-left transition-all flex items-center justify-between ${
+                        paymentMethod === 'jazzcash'
+                          ? 'border-red-600 bg-red-50/50 ring-2 ring-red-600 shadow-sm'
+                          : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-red-600 text-white font-black text-sm flex items-center justify-center shadow-sm">
+                          JC
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-extrabold text-xs text-slate-900">JazzCash</span>
+                            <span className="text-[9px] bg-red-100 text-red-800 font-extrabold px-1.5 py-0.2 rounded uppercase">
+                              Fast
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">Mobile App & Retailer</span>
+                        </div>
+                      </div>
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                        paymentMethod === 'jazzcash' ? 'border-red-600 bg-red-600' : 'border-slate-300'
+                      }`}>
+                        {paymentMethod === 'jazzcash' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                    </button>
+
+                    {/* Raast */}
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('raast')}
+                      className={`p-4 rounded-xl border text-left transition-all flex items-center justify-between ${
+                        paymentMethod === 'raast'
+                          ? 'border-sky-600 bg-sky-50/50 ring-2 ring-sky-600 shadow-sm'
+                          : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-sky-700 text-white font-black text-sm flex items-center justify-center shadow-sm">
+                          R
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-extrabold text-xs text-slate-900">Raast Instant</span>
+                            <span className="text-[9px] bg-sky-100 text-sky-800 font-extrabold px-1.5 py-0.2 rounded uppercase">
+                              Zero Fee
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-500 block mt-0.5">Any Pakistani Bank App</span>
+                        </div>
+                      </div>
+                      <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                        paymentMethod === 'raast' ? 'border-sky-600 bg-sky-600' : 'border-slate-300'
+                      }`}>
+                        {paymentMethod === 'raast' && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                    </button>
+
+                    {/* Credit / Debit Card (Temporarily Disabled - Coming Soon) */}
+                    <div
+                      className="p-4 rounded-xl border border-slate-200 bg-slate-100/60 text-left flex items-center justify-between opacity-70 cursor-not-allowed"
+                    >
+                      <div className="flex items-center gap-3">
+                        <CreditCard className="w-6 h-6 text-slate-400" />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs text-slate-700">Credit / Debit Card</span>
+                            <span className="text-[9px] bg-slate-200 text-slate-700 font-bold px-1.5 py-0.5 rounded-full uppercase">
+                              Coming Soon
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-500 block mt-0.5">Visa, Mastercard (Under Integration)</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-bold">Inactive</span>
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* Submit / Proceed to Payment Button */}
+                <button
+                  type="submit"
+                  disabled={isSubmittingHold}
+                  className="w-full bg-red-600 hover:bg-red-700 active:scale-98 text-white font-black py-4 px-8 rounded-2xl shadow-xl shadow-red-600/30 text-base transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+                >
+                  {isSubmittingHold ? (
+                    <span>Reserving Seats on Departure...</span>
+                  ) : (
+                    <>
+                      <span>Proceed to Payment (Rs {totalAmountPkr.toLocaleString()} PKR)</span>
+                      <ChevronRight className="w-5 h-5" />
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+
+            {/* Right 5 Cols: Sticky Order Summary */}
+            <div className="lg:col-span-5">
+              <div className="sticky top-28 bg-white rounded-3xl border border-slate-200 shadow-lg p-6 space-y-6">
+                
+                {/* Tour Header Card */}
+                <div className="flex gap-4">
+                  <div className="w-24 h-24 rounded-xl overflow-hidden shrink-0 relative">
+                    <ImageWithFallback
+                      src={tour.imageUrl}
+                      alt={tour.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-red-600 block">
+                      {tour.destination}
+                    </span>
+                    <h3 className="font-bold text-slate-900 text-sm line-clamp-2 mt-0.5">
+                      {tour.title}
+                    </h3>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>{tour.duration}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Reservation Summary */}
+                <div className="border-t border-slate-100 pt-4 space-y-3 text-xs">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Travel Date</span>
+                    <span className="font-bold text-slate-900">{travelDate}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Departure Time</span>
+                    <span className="font-bold text-slate-900">{selectedOption?.departureTime || '08:00 AM JST'}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Option</span>
+                    <span className="font-bold text-slate-900 truncate max-w-[180px]">{selectedOption?.title}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Travelers</span>
+                    <span className="font-bold text-slate-900">{adults} Adults{children > 0 ? `, ${children} Children` : ''}</span>
+                  </div>
+                </div>
+
+                {/* Price Breakdown */}
+                <div className="border-t border-slate-100 pt-4 space-y-2 text-xs">
+                  <div className="flex justify-between text-slate-600">
+                    <span>{adults} × Adult</span>
+                    <span className="font-bold text-slate-900">¥{adultsSubtotalJpy.toLocaleString()} JPY</span>
+                  </div>
+                  {children > 0 && (
+                    <div className="flex justify-between text-slate-600">
+                      <span>{children} × Child (30% off)</span>
+                      <span className="font-bold text-slate-900">¥{childrenSubtotalJpy.toLocaleString()} JPY</span>
+                    </div>
+                  )}
+
+                  <div className="border-t border-slate-200 pt-3 flex items-baseline justify-between">
+                    <div>
+                      <span className="text-sm font-black text-slate-900 block">Total Due:</span>
+                      <span className="text-[11px] text-slate-400">JPY Base: ¥{totalAmountJpy.toLocaleString()}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xl font-black text-red-600">
+                        Rs {totalAmountPkr.toLocaleString()} PKR
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Safe Traveler Badges */}
+                <div className="border-t border-slate-100 pt-4 space-y-2 text-xs text-slate-500">
+                  <div className="flex items-center gap-2 text-emerald-700 font-semibold">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Free cancellation up to 24 hours before tour start</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-slate-400 shrink-0" />
+                    <span>Instant payment confirmation after admin verification</span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
