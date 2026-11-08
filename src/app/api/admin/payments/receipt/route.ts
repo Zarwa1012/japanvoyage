@@ -61,7 +61,23 @@ export async function GET(request: NextRequest) {
     }
 
     if (!payment.proof_image_url) {
-      return NextResponse.json({ error: 'No receipt file attached to this payment submission.' }, { status: 404 });
+      return NextResponse.json({
+        success: true,
+        hasFile: false,
+        paymentId: payment.id,
+        bookingId: payment.booking_id,
+        bookingReference: (payment.booking as any)?.booking_reference,
+        customerName: (payment.booking as any)?.lead_traveler_name || payment.sender_name,
+        transactionId: payment.gateway_transaction_id,
+        amount: payment.amount,
+        currency: payment.currency,
+        senderName: payment.sender_name,
+        filePath: null,
+        fileName: `transaction_${payment.gateway_transaction_id}.txt`,
+        isPdf: false,
+        signedUrl: null,
+        message: 'No screenshot file attached. Transaction logged via reference ID.',
+      });
     }
 
     const filePath = payment.proof_image_url;
@@ -70,29 +86,50 @@ export async function GET(request: NextRequest) {
     const isPdf = filePath.toLowerCase().endsWith('.pdf') || (payment.raw_payload as any)?.receipt_mime_type === 'application/pdf';
 
     // 3. Handle Direct File Download (Requirement 5)
-    if (download && !isBase64) {
+    if (download) {
+      if (isBase64) {
+        const matches = filePath.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          const buffer = Buffer.from(matches[2], 'base64');
+          return new NextResponse(buffer, {
+            headers: {
+              'Content-Type': matches[1] || 'image/png',
+              'Content-Disposition': `attachment; filename="${fileName}"`,
+              'Cache-Control': 'no-store',
+            },
+          });
+        }
+      }
+
+      // Download from Supabase Storage
       const cleanPath = filePath.startsWith(`${RECEIPTS_BUCKET}/`)
         ? filePath.replace(`${RECEIPTS_BUCKET}/`, '')
         : filePath;
 
-      const { data: fileData, error: downloadError } = await adminSupabase.storage
-        .from(RECEIPTS_BUCKET)
-        .download(cleanPath);
+      try {
+        const { data: fileData, error: downloadError } = await adminSupabase.storage
+          .from(RECEIPTS_BUCKET)
+          .download(cleanPath);
 
-      if (downloadError || !fileData) {
-        return NextResponse.json({ error: `Failed to download file from storage: ${downloadError?.message}` }, { status: 500 });
+        if (!downloadError && fileData) {
+          const buffer = Buffer.from(await fileData.arrayBuffer());
+          const mimeType = isPdf ? 'application/pdf' : 'image/png';
+
+          return new NextResponse(buffer, {
+            headers: {
+              'Content-Type': mimeType,
+              'Content-Disposition': `attachment; filename="${fileName}"`,
+              'Cache-Control': 'no-store',
+            },
+          });
+        }
+      } catch (dlErr: any) {
+        console.warn('Direct storage download buffer error, falling back to signed url redirect:', dlErr?.message);
       }
 
-      const buffer = Buffer.from(await fileData.arrayBuffer());
-      const mimeType = isPdf ? 'application/pdf' : 'image/png';
-
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': mimeType,
-          'Content-Disposition': `attachment; filename="${fileName}"`,
-          'Cache-Control': 'no-store',
-        },
-      });
+      // Fallback: Redirect directly to secure signed URL
+      const signedUrl = await generateReceiptSignedUrl(adminSupabase, cleanPath, 3600);
+      return NextResponse.redirect(signedUrl, 302);
     }
 
     // 4. Generate Temporary Secure Signed URL (Requirement 4, 6)

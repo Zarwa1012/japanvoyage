@@ -129,6 +129,7 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
     isLoading: boolean;
     error: string | null;
   } | null>(null);
+  const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
 
   // Helper to open secure receipt preview (Requirement 4, 6)
   const handleOpenReceipt = async (p: AdminPaymentRecord) => {
@@ -155,7 +156,7 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
 
       setActiveReceipt(prev => prev ? {
         ...prev,
-        signedUrl: data.signedUrl,
+        signedUrl: data.signedUrl || null,
         fileName: data.fileName || 'receipt',
         isPdf: data.isPdf || false,
         isLoading: false,
@@ -167,6 +168,97 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
         isLoading: false,
         error: err.message || 'Could not load receipt file from Supabase storage.',
       } : null);
+    }
+  };
+
+  // Direct, rock-solid client-side download for admin receipt
+  const handleDownloadReceipt = async () => {
+    if (!activeReceipt) return;
+    setIsDownloadingReceipt(true);
+    try {
+      const fileName = activeReceipt.fileName || `receipt_${activeReceipt.transactionId || 'payment'}.${activeReceipt.isPdf ? 'pdf' : 'png'}`;
+
+      // 1. If signedUrl is available and is a data URI (base64)
+      if (activeReceipt.signedUrl?.startsWith('data:')) {
+        const link = document.createElement('a');
+        link.href = activeReceipt.signedUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      // 2. If signedUrl is available as HTTP URL, fetch blob directly
+      if (activeReceipt.signedUrl) {
+        try {
+          const res = await fetch(activeReceipt.signedUrl);
+          if (res.ok) {
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(link);
+            return;
+          }
+        } catch {
+          // If blob fetch fails, fall back to window.open
+          window.open(activeReceipt.signedUrl, '_blank');
+          return;
+        }
+      }
+
+      // 3. Fallback: If no receipt image was uploaded, generate a printable PDF receipt
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Payment Receipt - ${activeReceipt.transactionId}</title>
+              <style>
+                body { font-family: -apple-system, sans-serif; padding: 40px; color: #0f172a; max-width: 500px; margin: 0 auto; }
+                .header { text-align: center; border-bottom: 2px dashed #cbd5e1; padding-bottom: 20px; margin-bottom: 20px; }
+                .brand { font-size: 22px; font-weight: 900; color: #dc2626; }
+                .badge { display: inline-block; background: #ecfdf5; color: #065f46; font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 999px; text-transform: uppercase; margin-top: 8px; border: 1px solid #a7f3d0; }
+                .table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 20px 0; }
+                .table td { padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
+                .table td:first-child { color: #64748b; font-weight: 600; }
+                .table td:last-child { font-weight: 800; text-align: right; }
+                .print-btn { background: #0f172a; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 700; cursor: pointer; }
+                @media print { .print-btn { display: none; } }
+              </style>
+            </head>
+            <body>
+              <div class="header">
+                <div class="brand">JAPAN VOYAGE</div>
+                <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Verified Payment Record</div>
+                <div class="badge">Official Transaction Receipt</div>
+              </div>
+              <table class="table">
+                <tr><td>Booking Reference</td><td style="color: #dc2626; font-family: monospace;">${activeReceipt.bookingReference || 'N/A'}</td></tr>
+                <tr><td>Transaction ID (TRX)</td><td style="font-family: monospace;">${activeReceipt.transactionId}</td></tr>
+                <tr><td>Customer Name</td><td>${activeReceipt.customerName || 'Customer'}</td></tr>
+                <tr><td>Amount Verified</td><td>Rs ${(activeReceipt.amount || 0).toLocaleString()} PKR</td></tr>
+              </table>
+              <div style="text-align: center; margin-top: 24px;">
+                <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+              </div>
+              <script>window.onload = function() { setTimeout(function() { window.print(); }, 200); };</script>
+            </body>
+          </html>
+        `);
+        printWindow.document.close();
+      }
+    } catch (err: any) {
+      console.error('Download receipt error:', err);
+      alert('Could not download receipt: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsDownloadingReceipt(false);
     }
   };
 
@@ -1447,27 +1539,36 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
 
               {/* Action Buttons: Download & Open & Close (Requirement 5) */}
               <div className="flex items-center gap-2">
-                {activeReceipt.signedUrl && (
-                  <>
-                    <a
-                      href={`/api/admin/payments/receipt?paymentId=${activeReceipt.paymentId}&download=true`}
-                      className="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
-                      title="Download receipt file"
-                    >
+                <button
+                  type="button"
+                  onClick={handleDownloadReceipt}
+                  disabled={isDownloadingReceipt}
+                  className="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-50"
+                  title="Download receipt file"
+                >
+                  {isDownloadingReceipt ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Downloading...</span>
+                    </>
+                  ) : (
+                    <>
                       <Download className="w-3.5 h-3.5" />
                       <span>Download Receipt</span>
-                    </a>
-                    <a
-                      href={activeReceipt.signedUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"
-                      title="Open full size in a new tab"
-                    >
-                      <span>Open Tab</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </>
+                    </>
+                  )}
+                </button>
+                {activeReceipt.signedUrl && (
+                  <a
+                    href={activeReceipt.signedUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors"
+                    title="Open full size in a new tab"
+                  >
+                    <span>Open Tab</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
                 )}
                 <button
                   onClick={() => setActiveReceipt(null)}
@@ -1506,7 +1607,45 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
                     className="max-h-[68vh] w-auto object-contain rounded-xl shadow-lg border border-slate-800"
                   />
                 )
-              ) : null}
+              ) : (
+                <div className="p-6 bg-slate-800/90 border border-slate-700 rounded-2xl text-center max-w-md space-y-4 shadow-xl">
+                  <div className="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <h5 className="font-black text-sm text-white">Manual Payment Submission</h5>
+                    <p className="text-xs text-slate-400">
+                      Customer submitted payment details directly via transaction reference.
+                    </p>
+                  </div>
+                  <div className="bg-slate-900/90 rounded-xl p-3.5 text-xs text-left space-y-2 font-mono border border-slate-800">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Reference:</span>
+                      <span className="text-red-400 font-bold">{activeReceipt.bookingReference || 'N/A'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">TRX ID:</span>
+                      <span className="text-white font-bold">{activeReceipt.transactionId}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Amount:</span>
+                      <span className="text-emerald-400 font-bold">Rs {(activeReceipt.amount || 0).toLocaleString()} PKR</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Customer:</span>
+                      <span className="text-white font-sans">{activeReceipt.customerName}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDownloadReceipt}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Print / Download Receipt Voucher</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Modal Footer Info */}

@@ -84,6 +84,78 @@ export default function AccountPage() {
 
   const supabase = createClient();
 
+  // Instant Printable Official Ticket Voucher & Payment Receipt Download
+  const handleDownloadTicketVoucher = (voucher: any) => {
+    if (!voucher) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Please allow popups in your browser to download your ticket voucher receipt.');
+      return;
+    }
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Japan Voyage Ticket Receipt - ${voucher.reference}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #0f172a; max-width: 620px; margin: 0 auto; line-height: 1.5; }
+            .header { text-align: center; border-bottom: 2px dashed #cbd5e1; padding-bottom: 24px; margin-bottom: 24px; }
+            .brand { font-size: 26px; font-weight: 900; color: #dc2626; letter-spacing: -0.5px; }
+            .badge { display: inline-block; background: #ecfdf5; color: #065f46; font-size: 11px; font-weight: 800; padding: 4px 14px; border-radius: 9999px; text-transform: uppercase; margin-top: 8px; border: 1px solid #a7f3d0; }
+            .ref-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; text-align: center; margin-bottom: 24px; }
+            .ref { font-family: monospace; font-size: 22px; font-weight: 900; color: #dc2626; letter-spacing: 1px; }
+            .details { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; }
+            .details td { padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
+            .details td:first-child { color: #64748b; font-weight: 600; width: 40%; }
+            .details td:last-child { font-weight: 700; text-align: right; color: #0f172a; }
+            .qr-box { background: white; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 16px; margin: 20px auto; width: fit-content; text-align: center; font-family: monospace; font-size: 12px; font-weight: bold; }
+            .footer { text-align: center; color: #94a3b8; font-size: 11px; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+            .print-btn { background: #0f172a; color: white; border: none; padding: 12px 28px; border-radius: 10px; font-weight: 800; font-size: 13px; cursor: pointer; }
+            @media print { body { padding: 0; } .print-btn-container { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="brand">JAPAN VOYAGE</div>
+            <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Official Tour Ticket & Payment Receipt</div>
+            <div class="badge">✓ Verified Booking Voucher</div>
+          </div>
+          <div class="ref-box">
+            <div style="font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 800; letter-spacing: 1px;">Booking Reference</div>
+            <div class="ref">${voucher.reference}</div>
+            <div style="font-size: 13px; color: #475569; margin-top: 6px; font-weight: 600;">${voucher.participants} • Lead Traveler: ${fullName}</div>
+          </div>
+          <table class="details">
+            <tr><td>Tour Title</td><td>${voucher.tourTitle}</td></tr>
+            <tr><td>Departure Date & Time</td><td>${voucher.departureDate} at ${voucher.departureTime}</td></tr>
+            <tr><td>Meeting Point</td><td>${voucher.meetingPoint}</td></tr>
+            <tr><td>Ticket Status</td><td style="color: #059669; font-weight: 800;">CONFIRMED & VALIDATED</td></tr>
+            <tr><td>Total Charged</td><td style="font-weight: 800;">${voucher.price}</td></tr>
+            <tr><td>Emergency / Desk Contact</td><td>+92 324 6465916</td></tr>
+          </table>
+          <div class="qr-box">
+            [ QR VOUCHER: ${voucher.reference} ]<br />
+            <span style="font-size: 10px; color: #64748b; font-weight: normal;">Present this electronic ticket upon boarding</span>
+          </div>
+          <div class="print-btn-container" style="text-align: center; margin: 28px 0;">
+            <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+          </div>
+          <div class="footer">
+            Japan Voyage Inbound Tours • Support: zarwaaslam1010@gmail.com / WhatsApp: +92 324 6465916<br />
+            Thank you for traveling with Japan Voyage. Have a safe and memorable journey!
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 250);
+            };
+          </script>
+        </body>
+      </html>
+    `;
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   useEffect(() => {
     if (fullName) setEditName(fullName);
     if (country) setEditCountry(country);
@@ -393,17 +465,25 @@ export default function AccountPage() {
                       </div>
 
                       {/* Actions */}
-                      <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 self-end lg:self-center shrink-0 w-full sm:w-auto">
+                      <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 self-end lg:self-center shrink-0 w-full sm:w-auto">
                         <button
                           onClick={() => setSelectedVoucherModal(b)}
-                          className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+                          className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
                         >
                           <QrCode className="w-4 h-4" />
                           <span>View Voucher</span>
                         </button>
+                        <button
+                          onClick={() => handleDownloadTicketVoucher(b)}
+                          className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+                          title="Download printable ticket receipt"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>Download Receipt</span>
+                        </button>
                         <Link
                           href={`/tours/${b.tourSlug}`}
-                          className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all"
+                          className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all"
                         >
                           <span>Tour Details</span>
                         </Link>
@@ -660,11 +740,11 @@ export default function AccountPage() {
 
             <div className="mt-6 flex gap-3">
               <button
-                onClick={() => alert('PDF voucher download simulation triggered.')}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors"
+                onClick={() => handleDownloadTicketVoucher(selectedVoucherModal)}
+                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors shadow-md"
               >
                 <Download className="w-4 h-4" />
-                <span>Download Offline Ticket (PDF)</span>
+                <span>Download / Print Receipt Voucher (PDF)</span>
               </button>
             </div>
           </div>

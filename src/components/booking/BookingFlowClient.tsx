@@ -159,6 +159,73 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
     setTimeout(() => setCopiedField(null), 2500);
   };
 
+  const handleDownloadBookingReceipt = () => {
+    if (!bookingHold) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Please allow popups to download your receipt.');
+      return;
+    }
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Japan Voyage Payment Receipt - ${bookingHold.reference}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #0f172a; max-width: 600px; margin: 0 auto; line-height: 1.5; }
+            .header { text-align: center; border-bottom: 2px dashed #cbd5e1; padding-bottom: 24px; margin-bottom: 24px; }
+            .brand { font-size: 26px; font-weight: 900; color: #dc2626; }
+            .badge { display: inline-block; background: #ecfdf5; color: #065f46; font-size: 11px; font-weight: 800; padding: 4px 14px; border-radius: 9999px; text-transform: uppercase; margin-top: 8px; border: 1px solid #a7f3d0; }
+            .ref-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; text-align: center; margin-bottom: 24px; }
+            .ref { font-family: monospace; font-size: 22px; font-weight: 900; color: #dc2626; letter-spacing: 1px; }
+            .details { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; }
+            .details td { padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
+            .details td:first-child { color: #64748b; font-weight: 600; width: 40%; }
+            .details td:last-child { font-weight: 700; text-align: right; color: #0f172a; }
+            .footer { text-align: center; color: #94a3b8; font-size: 11px; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }
+            .print-btn { background: #0f172a; color: white; border: none; padding: 12px 28px; border-radius: 10px; font-weight: 800; font-size: 13px; cursor: pointer; }
+            @media print { body { padding: 0; } .print-btn-container { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="brand">JAPAN VOYAGE</div>
+            <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Official Payment & Reservation Receipt</div>
+            <div class="badge">Payment Proof Received • Under Finance Verification</div>
+          </div>
+          <div class="ref-box">
+            <div style="font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 800; letter-spacing: 1px;">Booking Reference</div>
+            <div class="ref">${bookingHold.reference}</div>
+            <div style="font-size: 13px; color: #475569; margin-top: 6px; font-weight: 600;">${adults + children} Travelers • Travel Date: ${travelDate}</div>
+          </div>
+          <table class="details">
+            <tr><td>Tour Title</td><td>${tour.title}</td></tr>
+            <tr><td>Total Amount Sent</td><td style="color: #059669; font-weight: 800;">Rs ${totalAmountPkr.toLocaleString()} PKR (${formatPrice(totalAmountJpy)})</td></tr>
+            <tr><td>Payment Channel</td><td style="text-transform: uppercase;">${paymentMethod}</td></tr>
+            <tr><td>Transaction ID (TRX / TID)</td><td style="font-family: monospace;">${transactionId || 'Logged'}</td></tr>
+            <tr><td>Sender Account Title</td><td>${senderName}</td></tr>
+            <tr><td>Sender Mobile</td><td>${senderMobile}</td></tr>
+            <tr><td>Verification Status</td><td style="color: #d97706; font-weight: 800;">Pending Finance Desk Review (5-15 mins)</td></tr>
+            <tr><td>Customer Support</td><td>+92 324 6465916 / info@japanvoyage.com</td></tr>
+          </table>
+          <div class="print-btn-container" style="text-align: center; margin: 28px 0;">
+            <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+          </div>
+          <div class="footer">
+            Japan Voyage Tours • Keep this receipt for your records • Present your booking reference upon boarding.
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 250);
+            };
+          </script>
+        </body>
+      </html>
+    `;
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   // Compress images in the browser so mobile photos (5MB-12MB) never exceed server limits
   const compressImage = async (file: File): Promise<File> => {
     if (file.type === 'application/pdf') return file;
@@ -525,6 +592,14 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                 {/* Action Buttons */}
                 <div className="space-y-3 pt-2">
                   <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleDownloadBookingReceipt}
+                      className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm px-6 py-4 rounded-xl shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download Payment Receipt</span>
+                    </button>
                     <Link
                       href="/account"
                       className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs sm:text-sm px-8 py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
