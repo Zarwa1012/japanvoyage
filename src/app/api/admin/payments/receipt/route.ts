@@ -3,6 +3,8 @@ import { createClient as createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { generateReceiptSignedUrl, RECEIPTS_BUCKET } from '@/lib/supabase/storage';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     // 1. Role-based authorization: Only verified admins can view/download payment receipts (Requirement 6)
