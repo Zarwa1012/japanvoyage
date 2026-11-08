@@ -35,6 +35,18 @@ export async function POST(request: Request) {
         const arrayBuffer = await file.arrayBuffer();
         receiptFileBuffer = Buffer.from(arrayBuffer);
       }
+
+      const base64Field = (formData.get('receiptFileBase64') as string) || '';
+      if (!receiptFileBuffer && base64Field) {
+        const matches = base64Field.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          receiptMimeType = matches[1];
+          receiptFileBuffer = Buffer.from(matches[2], 'base64');
+          receiptFileName = (formData.get('receiptFileName') as string) || (receiptMimeType.includes('pdf') ? 'receipt.pdf' : 'receipt.png');
+        } else {
+          fallbackImageUrl = base64Field;
+        }
+      }
     } else {
       const body = await request.json();
       bookingId = body.bookingId || '';

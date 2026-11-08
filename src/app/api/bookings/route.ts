@@ -129,6 +129,11 @@ export async function POST(request: Request) {
     const randomHex = Math.random().toString(36).substring(2, 6).toUpperCase();
     const bookingReference = `JV-2026-${randomHex}${timestampPart}`;
 
+    const safeLead = leadTraveler || (Array.isArray(participants) && participants[0]) || {};
+    const safeLeadName = `${safeLead.firstName || safeLead.fullName || ''} ${safeLead.lastName || ''}`.trim() || 'Lead Traveler';
+    const safeLeadEmail = (safeLead.email || 'guest@japanvoyage.com').trim().toLowerCase();
+    const safeLeadPhone = `${safeLead.countryCode || '+92'} ${safeLead.phoneNumber || safeLead.phone || ''}`.trim();
+
     // 3. Insert confirmed booking record
     const { data: booking, error: bookingErr } = await adminSupabase
       .from('bookings')
@@ -136,11 +141,11 @@ export async function POST(request: Request) {
         booking_reference: bookingReference,
         user_id: userId,
         tour_schedule_id: scheduleId,
-        lead_traveler_name: `${leadTraveler.firstName || ''} ${leadTraveler.lastName || ''}`.trim() || 'Lead Traveler',
-        lead_traveler_email: (leadTraveler.email || 'guest@japanvoyage.com').trim().toLowerCase(),
-        lead_traveler_phone: `${leadTraveler.countryCode || '+92'} ${leadTraveler.phoneNumber || ''}`.trim(),
-        emergency_contact: leadTraveler.emergencyContact || null,
-        special_requirements: leadTraveler.specialRequests || null,
+        lead_traveler_name: safeLeadName,
+        lead_traveler_email: safeLeadEmail,
+        lead_traveler_phone: safeLeadPhone,
+        emergency_contact: safeLead.emergencyContact || null,
+        special_requirements: safeLead.specialRequests || null,
         total_participants: Array.isArray(participants) && participants.length > 0 ? participants.length : 1,
         base_currency: 'JPY',
         total_base_amount: totalBaseJpy || 14500,

@@ -8,6 +8,7 @@ import {
   CreditCard, 
   Lock, 
   CheckCircle, 
+  CheckCircle2,
   Clock, 
   Users, 
   ChevronRight, 
@@ -27,7 +28,8 @@ import {
   Building2,
   PhoneCall,
   User,
-  Info
+  Info,
+  ExternalLink
 } from 'lucide-react';
 import { MockTour } from '@/data/mockTours';
 import { useCurrency } from '@/context/CurrencyContext';
@@ -157,37 +159,91 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
     setTimeout(() => setCopiedField(null), 2500);
   };
 
+  // Compress images in the browser so mobile photos (5MB-12MB) never exceed server limits
+  const compressImage = async (file: File): Promise<File> => {
+    if (file.type === 'application/pdf') return file;
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new (window as any).Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 1400;
+
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(file);
+          ctx.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) return resolve(file);
+              const compressedFile = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
+                type: 'image/jpeg',
+                lastModified: Date.now(),
+              });
+              resolve(compressedFile);
+            },
+            'image/jpeg',
+            0.8
+          );
+        };
+        img.onerror = () => resolve(file);
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => resolve(file);
+      reader.readAsDataURL(file);
+    });
+  };
+
   // Handle proof receipt upload (Image or PDF)
-  const handleProofFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleProofFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
 
     const allowedMime = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'application/pdf'];
-    if (!allowedMime.includes(file.type.toLowerCase())) {
+    if (!allowedMime.includes(rawFile.type.toLowerCase())) {
       setVerificationError('Invalid file format. Please upload an image (PNG, JPG, WEBP) or a PDF receipt document.');
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      setVerificationError('File size exceeds the 10 MB limit. Please upload a smaller receipt.');
+    if (rawFile.size > 15 * 1024 * 1024) {
+      setVerificationError('File size exceeds the 15 MB limit. Please upload a smaller receipt.');
       return;
     }
 
-    setReceiptFile(file);
-    setProofFileName(file.name);
+    const isPdf = rawFile.type === 'application/pdf' || rawFile.name.toLowerCase().endsWith('.pdf');
+    setIsReceiptPdf(isPdf);
     setVerificationError(null);
 
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    setIsReceiptPdf(isPdf);
+    if (isPdf) {
+      setReceiptFile(rawFile);
+      setProofFileName(rawFile.name);
+      setProofImageBase64(null);
+    } else {
+      // Compress image to ensure fast upload under 500KB
+      const compressed = await compressImage(rawFile);
+      setReceiptFile(compressed);
+      setProofFileName(rawFile.name);
 
-    if (!isPdf) {
       const reader = new FileReader();
       reader.onloadend = () => {
         setProofImageBase64(reader.result as string);
       };
-      reader.readAsDataURL(file);
-    } else {
-      setProofImageBase64(null);
+      reader.readAsDataURL(compressed);
     }
   };
 
@@ -279,11 +335,25 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
 
     if (!transactionId.trim()) {
       setVerificationError('Transaction ID (TRX / TID / Reference number) is required.');
+      setTimeout(() => {
+        const el = document.getElementById('transactionIdInput') || document.getElementById('verification-error-bottom');
+        if (el) {
+          el.focus();
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 50);
       return;
     }
 
     if (!senderName.trim() || !senderMobile.trim()) {
-      setVerificationError('Sender account name and mobile number are required.');
+      setVerificationError('Sender account title and mobile number are required.');
+      setTimeout(() => {
+        const el = document.getElementById('senderNameInput') || document.getElementById('verification-error-bottom');
+        if (el) {
+          el.focus();
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 50);
       return;
     }
 
@@ -320,9 +390,21 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
       }
 
       setIsVerificationSubmitted(true);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setTimeout(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        const successEl = document.getElementById('verification-success-screen');
+        if (successEl) {
+          successEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 50);
     } catch (err: any) {
       setVerificationError(err.message || 'Error submitting payment verification.');
+      setTimeout(() => {
+        const errEl = document.getElementById('verification-error-bottom') || document.getElementById('verification-error-top');
+        if (errEl) {
+          errEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 50);
     } finally {
       setIsSubmittingProof(false);
     }
@@ -357,100 +439,170 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
         {bookingHold ? (
           <div className="max-w-3xl mx-auto space-y-6">
             
-            {/* Countdown / Hold Header */}
-            <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl text-center">
-              
-              {isVerificationSubmitted ? (
-                <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-in zoom-in-95">
-                  <Clock className="w-9 h-9 stroke-[2.5]" />
-                </div>
-              ) : (
-                <div className="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Timer className="w-8 h-8 stroke-[2.5]" />
-                </div>
-              )}
-
-              <div className="flex items-center justify-center gap-2">
-                <span className={`text-xs font-extrabold uppercase tracking-widest px-3 py-1 rounded-full ${
-                  isVerificationSubmitted
-                    ? 'text-amber-800 bg-amber-100 border border-amber-300'
-                    : 'text-red-700 bg-red-50 border border-red-200'
-                }`}>
-                  {isVerificationSubmitted ? 'Payment Pending Admin Verification' : 'Seat Hold Active (15 Min)'}
-                </span>
-              </div>
-
-              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
-                {isVerificationSubmitted ? 'Payment Proof Submitted!' : 'Complete Your Payment Transfer'}
-              </h1>
-              
-              <p className="text-xs sm:text-sm text-slate-600 mt-1.5 max-w-lg mx-auto">
-                {isVerificationSubmitted ? (
-                  <>Thank you for submitting your transaction details. Our administrator team will verify your transfer and issue your confirmed tour QR voucher.</>
-                ) : (
-                  <>Seats are temporarily held for booking <strong>{bookingHold.reference}</strong>. Send the exact PKR amount using your selected Pakistani payment method below.</>
-                )}
-              </p>
-
-              {!isVerificationSubmitted && (
-                <div className="mt-4 inline-flex items-center gap-2 bg-amber-50 text-amber-900 px-4 py-2 rounded-xl border border-amber-200 text-xs font-bold">
-                  <Clock className="w-4 h-4 text-amber-600" />
-                  <span>Time Remaining: </span>
-                  <span className="font-mono text-sm font-black text-amber-700">{formatCountdown(secondsRemaining)}</span>
-                </div>
-              )}
-
-              {/* Booking Snapshot */}
-              <div className="mt-6 bg-slate-50 rounded-2xl p-4 sm:p-5 border border-slate-200 text-left grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-                <div>
-                  <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Reference</span>
-                  <span className="font-mono text-sm font-black text-red-600">{bookingHold.reference}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Total Amount</span>
-                  <span className="font-black text-sm text-slate-900">Rs {totalAmountPkr.toLocaleString()} PKR</span>
-                  <span className="text-[10px] text-slate-400 block font-normal">({formatPrice(totalAmountJpy)})</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Travel Date</span>
-                  <span className="font-bold text-slate-800">{travelDate}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Travelers</span>
-                  <span className="font-bold text-slate-800">{adults + children} Persons</span>
-                </div>
-              </div>
-            </div>
-
-            {/* If Payment Verification is Already Submitted */}
+            {/* If Payment Verification is Submitted: Dedicated Full Confirmation Screen */}
             {isVerificationSubmitted ? (
-              <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl space-y-6">
-                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-start gap-3">
-                  <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                  <div className="text-xs text-amber-900 space-y-1">
-                    <span className="font-bold block text-sm">Under Review by Administrator</span>
-                    <p>
-                      Your transaction ID <strong>{transactionId}</strong> has been logged. In compliance with security standards, bookings are confirmed only after payment verification by our finance desk (typically within 5 to 15 minutes during business hours).
+              <div id="verification-success-screen" className="bg-white rounded-3xl p-6 sm:p-10 border border-emerald-200 shadow-2xl text-center space-y-8 animate-in fade-in zoom-in-95 duration-300">
+                
+                {/* Animated Green Badge */}
+                <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner ring-8 ring-emerald-50">
+                  <CheckCircle2 className="w-12 h-12 stroke-[2.5]" />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Payment Proof Received</span>
+                  </div>
+                  <h1 className="text-2xl sm:text-4xl font-black text-slate-900 tracking-tight">
+                    Proof Submitted Successfully!
+                  </h1>
+                  <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
+                    Thank you! Your payment verification details have been received by our finance desk. Your seats remain securely held while your transaction is confirmed.
+                  </p>
+                </div>
+
+                {/* Reference & Summary Box */}
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-left space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200 gap-2">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                        Booking Reference
+                      </span>
+                      <span className="text-lg sm:text-xl font-mono font-black text-red-600">
+                        {bookingHold.reference}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(bookingHold.reference, 'ref')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-all shadow-sm w-fit"
+                    >
+                      {copiedField === 'ref' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-700">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Copy Reference</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Tour</span>
+                      <span className="font-extrabold text-slate-900 line-clamp-1">{tour.title}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Amount Sent</span>
+                      <span className="font-black text-emerald-700 text-sm">Rs {totalAmountPkr.toLocaleString()} PKR</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Channel</span>
+                      <span className="font-bold text-slate-800 uppercase">{paymentMethod}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">TRX ID / TID</span>
+                      <span className="font-mono font-bold text-slate-800">{transactionId || 'Logged'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Verification Steps / SLA Box */}
+                <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200/80 flex items-start gap-3.5 text-left">
+                  <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-950 space-y-1">
+                    <span className="font-bold text-sm block">Verification in Progress (Typical SLA: 5 – 15 Mins)</span>
+                    <p className="text-slate-700 leading-relaxed">
+                      Our finance desk is matching your transaction <strong>{transactionId}</strong> with our account statements. Once verified, your status will update to <strong className="text-emerald-700">Confirmed</strong> and your tour QR ticket voucher will be ready to download in your account.
                     </p>
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-                  <Link
-                    href="/account"
-                    className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-6 py-3.5 rounded-xl shadow-md transition-all text-center"
-                  >
-                    View in Customer Account
-                  </Link>
-                  <Link
-                    href="/tours"
-                    className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-6 py-3.5 rounded-xl transition-all text-center"
-                  >
-                    Browse More Tours
-                  </Link>
+                {/* Action Buttons */}
+                <div className="space-y-3 pt-2">
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                    <Link
+                      href="/account"
+                      className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs sm:text-sm px-8 py-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
+                    >
+                      <User className="w-4 h-4" />
+                      <span>View My Bookings & Tickets</span>
+                    </Link>
+                    <Link
+                      href="/tours"
+                      className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm px-6 py-4 rounded-xl transition-all flex items-center justify-center gap-2"
+                    >
+                      <span>Explore More Tours</span>
+                    </Link>
+                  </div>
+                  
+                  <div>
+                    <a
+                      href="https://wa.me/923246465916"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 hover:underline pt-2"
+                    >
+                      <span>Need instant confirmation? Contact Finance Desk on WhatsApp (+92 324 6465916)</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
                 </div>
+
               </div>
             ) : (
+              <>
+                {/* Countdown / Hold Header */}
+                <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl text-center">
+                  <div className="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Timer className="w-8 h-8 stroke-[2.5]" />
+                  </div>
+
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="text-xs font-extrabold uppercase tracking-widest px-3 py-1 rounded-full text-red-700 bg-red-50 border border-red-200">
+                      Seat Hold Active (15 Min)
+                    </span>
+                  </div>
+
+                  <h1 className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
+                    Complete Your Payment Transfer
+                  </h1>
+                  
+                  <p className="text-xs sm:text-sm text-slate-600 mt-1.5 max-w-lg mx-auto">
+                    Seats are temporarily held for booking <strong>{bookingHold.reference}</strong>. Send the exact PKR amount using your selected Pakistani payment method below.
+                  </p>
+
+                  <div className="mt-4 inline-flex items-center gap-2 bg-amber-50 text-amber-900 px-4 py-2 rounded-xl border border-amber-200 text-xs font-bold">
+                    <Clock className="w-4 h-4 text-amber-600" />
+                    <span>Time Remaining: </span>
+                    <span className="font-mono text-sm font-black text-amber-700">{formatCountdown(secondsRemaining)}</span>
+                  </div>
+
+                  {/* Booking Snapshot */}
+                  <div className="mt-6 bg-slate-50 rounded-2xl p-4 sm:p-5 border border-slate-200 text-left grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Reference</span>
+                      <span className="font-mono text-sm font-black text-red-600">{bookingHold.reference}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Total Amount</span>
+                      <span className="font-black text-sm text-slate-900">Rs {totalAmountPkr.toLocaleString()} PKR</span>
+                      <span className="text-[10px] text-slate-400 block font-normal">({formatPrice(totalAmountJpy)})</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Travel Date</span>
+                      <span className="font-bold text-slate-800">{travelDate}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Travelers</span>
+                      <span className="font-bold text-slate-800">{adults + children} Persons</span>
+                    </div>
+                  </div>
+                </div>
 
               /* ========================================================================= */
               /* PAYMENT INSTRUCTIONS & VERIFICATION SUBMISSION FORM                      */
@@ -613,7 +765,7 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                   </div>
 
                   {verificationError && (
-                    <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+                    <div id="verification-error-top" className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
                       <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                       <span>{verificationError}</span>
                     </div>
@@ -626,6 +778,7 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                         Sender Account Title / Name <span className="text-red-600">*</span>
                       </label>
                       <input
+                        id="senderNameInput"
                         type="text"
                         value={senderName}
                         onChange={(e) => setSenderName(e.target.value)}
@@ -641,6 +794,7 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                         Sender Mobile Number <span className="text-red-600">*</span>
                       </label>
                       <input
+                        id="senderMobileInput"
                         type="text"
                         value={senderMobile}
                         onChange={(e) => setSenderMobile(e.target.value)}
@@ -657,6 +811,7 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                       Transaction ID (TRX ID / TID / Reference Number) <span className="text-red-600">*</span>
                     </label>
                     <input
+                      id="transactionIdInput"
                       type="text"
                       value={transactionId}
                       onChange={(e) => setTransactionId(e.target.value)}
@@ -760,6 +915,17 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                     />
                   </div>
 
+                  {/* Inline Error Notice directly above submit button */}
+                  {verificationError && (
+                    <div id="verification-error-bottom" className="p-4 rounded-xl bg-red-50 border-2 border-red-300 text-red-800 text-xs flex items-start gap-2.5 animate-in fade-in">
+                      <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-sm block">Verification Details Required</span>
+                        <p>{verificationError}</p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Submit Button */}
                   <button
                     type="submit"
@@ -767,7 +933,10 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                     className="w-full bg-red-600 hover:bg-red-700 active:scale-98 text-white font-extrabold text-xs sm:text-sm py-4 px-6 rounded-xl shadow-lg shadow-red-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     {isSubmittingProof ? (
-                      <span>Verifying & Submitting Proof...</span>
+                      <span className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 animate-spin" />
+                        <span>Verifying & Submitting Proof...</span>
+                      </span>
                     ) : (
                       <>
                         <ShieldCheck className="w-4 h-4" />
@@ -778,10 +947,11 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                 </form>
 
               </div>
-            )}
+            </>
+          )}
 
-          </div>
-        ) : (
+        </div>
+      ) : (
 
           /* ========================================================================= */
           /* VIEW 1: STANDARD CHECKOUT & PARTICIPANT DETAILS FORM                      */
