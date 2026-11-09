@@ -141,7 +141,7 @@ export default function AccountPage() {
             <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
           </div>
           <div class="footer">
-            Japan Voyage Inbound Tours • Support: zarwaaslam1010@gmail.com / WhatsApp: +92 324 6465916<br />
+            Japan Voyage Inbound Tours • Support: zarwaaslam10102@gmail.com / WhatsApp: +92 324 6465916<br />
             Thank you for traveling with Japan Voyage. Have a safe and memorable journey!
           </div>
           <script>

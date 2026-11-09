@@ -20,8 +20,16 @@ export async function GET() {
       .eq('id', user.id)
       .single();
 
-    if (profile?.role !== 'admin') {
+    const isSuperAdminEmail =
+      user.email?.toLowerCase() === 'zarwaaslam10102@gmail.com' ||
+      user.email?.toLowerCase() === 'admin@japanvoyage.com';
+
+    if (profile?.role !== 'admin' && !isSuperAdminEmail) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    if (isSuperAdminEmail && profile?.role !== 'admin') {
+      await adminSupabase.from('profiles').update({ role: 'admin' }).eq('id', user.id);
     }
 
     // 1. Fetch registered profiles

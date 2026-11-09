@@ -57,7 +57,11 @@ export default function AdminPage() {
   }
 
   // Authenticated but NOT an Admin (Regular customer)
-  if (role !== 'admin') {
+  const isSuperAdminEmail =
+    user?.email?.toLowerCase() === 'zarwaaslam10102@gmail.com' ||
+    user?.email?.toLowerCase() === 'admin@japanvoyage.com';
+
+  if (role !== 'admin' && !isSuperAdminEmail) {
     return (
       <div className="min-h-screen flex flex-col bg-slate-100">
         <Navbar />

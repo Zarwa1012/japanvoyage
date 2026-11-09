@@ -260,7 +260,7 @@ export async function downloadReceiptVoucher(data: ReceiptVoucherData): Promise<
   ctx.fillStyle = '#64748b';
   ctx.font = '500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   ctx.fillText('Present this receipt or your Booking Reference upon tour departure check-in.', qrX + 120, footerY + 70);
-  ctx.fillText('Official Support: zarwaaslam1010@gmail.com | WhatsApp: +92 324 6465916', qrX + 120, footerY + 92);
+  ctx.fillText('Official Support: zarwaaslam10102@gmail.com | WhatsApp: +92 324 6465916', qrX + 120, footerY + 92);
   ctx.fillText('Japan Voyage Inbound Operations • Tokyo & Kyoto, Japan', qrX + 120, footerY + 114);
 
   // 10. Direct Download Blob Trigger (No print popups!)

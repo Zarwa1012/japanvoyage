@@ -17,14 +17,22 @@ export async function POST(request: Request) {
     const adminSupabase = createAdminClient();
 
     // Check admin role in profiles
-    const { data: profile, error: profErr } = await adminSupabase
+    const { data: profile } = await adminSupabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .single();
 
-    if (profErr || profile?.role !== 'admin') {
+    const isSuperAdminEmail =
+      user.email?.toLowerCase() === 'zarwaaslam10102@gmail.com' ||
+      user.email?.toLowerCase() === 'admin@japanvoyage.com';
+
+    if (profile?.role !== 'admin' && !isSuperAdminEmail) {
       return NextResponse.json({ error: 'Forbidden: administrator access required.' }, { status: 403 });
+    }
+
+    if (isSuperAdminEmail && profile?.role !== 'admin') {
+      await adminSupabase.from('profiles').update({ role: 'admin' }).eq('id', user.id);
     }
 
     const body = await request.json();

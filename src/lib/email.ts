@@ -22,7 +22,7 @@ export interface AdminPaymentProofAlert {
 }
 
 export async function sendAdminPaymentProofNotification(data: AdminPaymentProofAlert): Promise<{ success: boolean; provider: string }> {
-  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'zarwaaslam1010@gmail.com';
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'zarwaaslam10102@gmail.com';
   const resendApiKey = process.env.RESEND_API_KEY;
 
   const subject = `🚨 [Payment Proof Submitted] Booking #${data.bookingReference} (Rs ${data.amountPkr.toLocaleString()} PKR)`;

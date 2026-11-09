@@ -82,6 +82,21 @@ export async function GET() {
       console.warn('Profile update warning:', profileErr.message);
     }
 
+    // Also promote zarwaaslam10102@gmail.com if present
+    const zarwaUser = listData.users.find(
+      (u) => u.email?.toLowerCase() === 'zarwaaslam10102@gmail.com'
+    );
+    if (zarwaUser) {
+      await adminSupabase.from('profiles').upsert({
+        id: zarwaUser.id,
+        email: 'zarwaaslam10102@gmail.com',
+        full_name: 'Zarwa Aslam (Super Admin)',
+        role: 'admin',
+        preferred_currency: 'PKR',
+        updated_at: new Date().toISOString(),
+      });
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Admin account has been configured and verified successfully!',

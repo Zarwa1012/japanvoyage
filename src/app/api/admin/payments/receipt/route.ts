@@ -24,8 +24,16 @@ export async function GET(request: NextRequest) {
       .eq('id', user.id)
       .single();
 
-    if (profErr || profile?.role !== 'admin') {
+    const isSuperAdminEmail =
+      user.email?.toLowerCase() === 'zarwaaslam10102@gmail.com' ||
+      user.email?.toLowerCase() === 'admin@japanvoyage.com';
+
+    if ((profErr || profile?.role !== 'admin') && !isSuperAdminEmail) {
       return NextResponse.json({ error: 'Forbidden: Administrator credentials required.' }, { status: 403 });
+    }
+
+    if (isSuperAdminEmail && profile?.role !== 'admin') {
+      await adminSupabase.from('profiles').update({ role: 'admin' }).eq('id', user.id);
     }
 
     const searchParams = request.nextUrl.searchParams;

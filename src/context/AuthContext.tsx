@@ -48,6 +48,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
 
   const fetchProfile = useCallback(async (currentUser: User) => {
+    const isSuperAdminEmail =
+      currentUser.email?.toLowerCase() === 'zarwaaslam10102@gmail.com' ||
+      currentUser.email?.toLowerCase() === 'admin@japanvoyage.com';
+
     try {
       // 1. Try to query public.profiles table
       const { data, error } = await supabase
@@ -57,8 +61,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
 
       if (!error && data) {
-        setProfile(data as UserProfile);
-        setRole((data.role as UserRole) || 'customer');
+        const resolvedRole = (isSuperAdminEmail ? 'admin' : (data.role as UserRole) || 'customer');
+        setProfile({ ...data, role: resolvedRole } as UserProfile);
+        setRole(resolvedRole);
         return;
       }
     } catch {
@@ -66,10 +71,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Fallback: derive profile safely
-    // NEVER trust user_metadata.role (which can be submitted by a client during registration)
-    // Only app_metadata.role (set exclusively by service_role/admin) or default to 'customer'
-    const userRole: UserRole =
-      (currentUser.app_metadata?.role as UserRole) || 'customer';
+    const userRole: UserRole = isSuperAdminEmail
+      ? 'admin'
+      : (currentUser.app_metadata?.role as UserRole) || 'customer';
 
     const fallbackProfile: UserProfile = {
       id: currentUser.id,
