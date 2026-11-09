@@ -107,7 +107,10 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'easypaisa' | 'jazzcash' | 'raast'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'PAID' | 'REJECTED'>('all');
   const [paymentSearch, setPaymentSearch] = useState('');
-  const [bookingFilter, setBookingFilter] = useState<'confirmed' | 'all'>('confirmed');
+  const [bookingFilter, setBookingFilter] = useState<'confirmed' | 'pending' | 'all'>('confirmed');
+  const [bookingsSearch, setBookingsSearch] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [serverBookingStats, setServerBookingStats] = useState<any>(null);
   const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null);
   const [rejectingPayment, setRejectingPayment] = useState<AdminPaymentRecord | null>(null);
   const [rejectionReasonInput, setRejectionReasonInput] = useState('');
@@ -286,54 +289,81 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
     }
   };
 
+  // Fetch real Bookings from authenticated Server API (bypasses RLS)
+  const fetchBookings = async () => {
+    try {
+      const res = await fetch('/api/admin/bookings');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.bookings) {
+          setBookingsList(data.bookings.map((b: any) => ({
+            id: b.id,
+            reference: b.booking_reference,
+            customer: b.lead_traveler_name || 'Traveler',
+            email: b.lead_traveler_email || 'guest@japanvoyage.com',
+            phone: b.lead_traveler_phone || '',
+            participants: b.total_participants || 1,
+            nationality: b.lead_traveler_phone?.startsWith('+92') || b.charged_currency === 'PKR' ? '🇵🇰 Pakistan' : '🌍 International',
+            tourTitle: b.schedule?.tour_option?.tour?.title || b.schedule?.tour_option?.title || 'Japan Voyage Tour Reservation',
+            tourSlug: b.schedule?.tour_option?.tour?.slug || '',
+            date: b.schedule?.tour_date || (b.created_at ? new Date(b.created_at).toISOString().split('T')[0] : 'N/A'),
+            time: b.schedule?.start_time_jst || '09:00',
+            gateway: (b.payment_method || (b.charged_currency === 'PKR' ? 'Pakistani Gateway' : 'CARD')).toUpperCase(),
+            amountJpy: Number(b.total_base_amount || 0),
+            chargedAmountPkr: Number(b.charged_amount || 0),
+            chargedCurrency: b.charged_currency || 'PKR',
+            status: b.status === 'confirmed' ? 'Confirmed' : b.status === 'hold_pending_payment' ? 'Hold Pending' : b.status === 'cancelled_by_operator' ? 'Cancelled' : b.status,
+            isConfirmed: b.status === 'confirmed',
+            rawStatus: b.status,
+            createdAt: b.created_at,
+          })));
+        }
+        if (data.stats) {
+          setServerBookingStats(data.stats);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching admin bookings:', err);
+    }
+  };
+
+  // Fetch real Customers from authenticated Server API (bypasses RLS)
+  const fetchCustomers = async () => {
+    try {
+      const res = await fetch('/api/admin/customers');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.customers) {
+          setCustomers(data.customers);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching admin customers:', err);
+    }
+  };
+
+  // Concurrently refresh all live operational data
+  const refreshAllData = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        fetchPayments(),
+        fetchBookings(),
+        fetchCustomers(),
+      ]);
+    } catch (err) {
+      console.error('Error refreshing admin data:', err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // Fetch real database data on mount
   useEffect(() => {
     async function loadAdminData() {
       setLoadingDb(true);
       try {
-        // 1. Fetch real bookings from Supabase
-        const { data: dbBookings } = await supabase
-          .from('bookings')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (dbBookings && dbBookings.length > 0) {
-          setBookingsList(dbBookings.map((b: any) => ({
-            id: b.id,
-            reference: b.booking_reference,
-            customer: b.lead_traveler_name || 'Traveler',
-            email: b.lead_traveler_email || 'guest@japanvoyage.com',
-            nationality: '🌍 International',
-            tourTitle: 'Japan Voyage Tour Reservation',
-            date: b.created_at ? new Date(b.created_at).toISOString().split('T')[0] : '2026-11-20',
-            gateway: b.payment_method ? b.payment_method.toUpperCase() : (b.charged_currency === 'PKR' ? 'PAKISTANI GATEWAY' : 'CARD'),
-            amountJpy: Number(b.total_base_amount || 0),
-            status: b.status === 'confirmed' ? 'Confirmed' : b.status === 'hold_pending_payment' ? 'Hold Pending' : b.status === 'cancelled_by_operator' ? 'Cancelled / Rejected' : b.status,
-            isConfirmed: b.status === 'confirmed',
-            rawStatus: b.status
-          })));
-        } else {
-          setBookingsList([]);
-        }
-
-        // 2. Fetch real customer profiles from Supabase
-        const { data: dbProfiles } = await supabase
-          .from('profiles')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (dbProfiles && dbProfiles.length > 0) {
-          setCustomers(dbProfiles.map((p: any) => ({
-            name: p.full_name || p.email.split('@')[0],
-            email: p.email,
-            country: p.nationality_code || 'International Traveler',
-            bookings: 0,
-            spentJpy: 0,
-            status: p.role === 'admin' ? 'Admin' : 'Active'
-          })));
-        } else {
-          setCustomers([]);
-        }
+        await refreshAllData();
 
         // 3. Fetch real reviews from Supabase
         const { data: dbReviews } = await supabase
@@ -353,9 +383,6 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
         } else {
           setReviews([]);
         }
-
-        // 4. Fetch payments
-        await fetchPayments();
       } catch (err) {
         console.error('Error fetching real admin data:', err);
       } finally {
@@ -374,6 +401,28 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
     navigator.clipboard.writeText(text);
     setCopiedTxn(text);
     setTimeout(() => setCopiedTxn(null), 2500);
+  };
+
+  // Open receipt for a booking directly
+  const handleOpenBookingReceipt = (booking: any) => {
+    const matchedPayment = paymentsList.find(p => p.booking_id === booking.id || p.booking?.booking_reference === booking.reference);
+    if (matchedPayment) {
+      handleOpenReceipt(matchedPayment);
+    } else {
+      setActiveReceipt({
+        paymentId: booking.id,
+        bookingReference: booking.reference,
+        bookingId: booking.id,
+        customerName: booking.customer,
+        transactionId: booking.reference,
+        amount: booking.chargedAmountPkr,
+        signedUrl: null,
+        fileName: `receipt_${booking.reference}.pdf`,
+        isPdf: false,
+        isLoading: false,
+        error: null,
+      });
+    }
   };
 
   // Payment Verification Handler (Approve / Reject) (Requirements 6, 7, 8, 9, 10)
@@ -402,31 +451,8 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
           : `Payment rejected. Status updated to REJECTED with rejection reason recorded.`,
       });
 
-      // Refresh payments list
-      await fetchPayments();
-
-      // Refresh bookings
-      const { data: dbBookings } = await supabase
-        .from('bookings')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (dbBookings) {
-        setBookingsList(dbBookings.map((b: any) => ({
-          id: b.id,
-          reference: b.booking_reference,
-          customer: b.lead_traveler_name || 'Traveler',
-          email: b.lead_traveler_email || 'guest@japanvoyage.com',
-          nationality: '🌍 International',
-          tourTitle: 'Japan Voyage Tour Reservation',
-          date: b.created_at ? new Date(b.created_at).toISOString().split('T')[0] : '2026-11-20',
-          gateway: b.payment_method ? b.payment_method.toUpperCase() : (b.charged_currency === 'PKR' ? 'PAKISTANI GATEWAY' : 'CARD'),
-          amountJpy: Number(b.total_base_amount || 0),
-          status: b.status === 'confirmed' ? 'Confirmed' : b.status === 'hold_pending_payment' ? 'Hold Pending' : b.status === 'cancelled_by_operator' ? 'Cancelled / Rejected' : b.status,
-          isConfirmed: b.status === 'confirmed',
-          rawStatus: b.status
-        })));
-      }
+      // Concurrently refresh all live admin operational data
+      await refreshAllData();
 
       if (action === 'reject') {
         setRejectingPayment(null);
@@ -473,17 +499,29 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
   const pendingCount = paymentsList.filter(p => getDisplayPaymentStatus(p.status) === 'PENDING').length;
   const paidCount = paymentsList.filter(p => getDisplayPaymentStatus(p.status) === 'PAID').length;
   const rejectedCount = paymentsList.filter(p => getDisplayPaymentStatus(p.status) === 'REJECTED').length;
+  const confirmedBookingsCount = bookingsList.filter((b) => b.isConfirmed).length;
+  const pendingDatabaseBookingsCount = bookingsList.filter((b) => !b.isConfirmed && b.rawStatus !== 'cancelled_by_operator' && b.rawStatus !== 'rejected').length;
+  const confirmedRevenueJpy = bookingsList.filter((b) => b.isConfirmed).reduce((sum, b) => sum + (b.amountJpy || 0), 0) || (serverBookingStats?.confirmedRevenueJpy || 0);
+  const confirmedRevenuePkr = bookingsList.filter((b) => b.isConfirmed).reduce((sum, b) => sum + (b.chargedAmountPkr || 0), 0) || (serverBookingStats?.confirmedRevenuePkr || 0);
   const totalVerifiedPkr = paymentsList
     .filter(p => getDisplayPaymentStatus(p.status) === 'PAID')
-    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || confirmedRevenuePkr;
 
-  // Verified vs All bookings filtering (User requirement: only show admin-verified bookings in booking table)
-  const displayedBookings = bookingFilter === 'confirmed'
-    ? bookingsList.filter((b) => b.isConfirmed)
-    : bookingsList;
-  const confirmedBookingsCount = bookingsList.filter((b) => b.isConfirmed).length;
-  const pendingDatabaseBookingsCount = bookingsList.filter((b) => !b.isConfirmed).length;
-  const confirmedRevenueJpy = bookingsList.filter((b) => b.isConfirmed).reduce((sum, b) => sum + (b.amountJpy || 0), 0);
+  // Filtered Bookings for the Bookings Tab
+  const displayedBookings = bookingsList.filter((b) => {
+    if (bookingFilter === 'confirmed' && !b.isConfirmed) return false;
+    if (bookingFilter === 'pending' && b.isConfirmed) return false;
+    if (bookingsSearch.trim()) {
+      const q = bookingsSearch.toLowerCase();
+      const matchRef = b.reference?.toLowerCase().includes(q);
+      const matchCust = b.customer?.toLowerCase().includes(q);
+      const matchEmail = b.email?.toLowerCase().includes(q);
+      const matchTour = b.tourTitle?.toLowerCase().includes(q);
+      const matchPhone = b.phone?.toLowerCase().includes(q);
+      return matchRef || matchCust || matchEmail || matchTour || matchPhone;
+    }
+    return true;
+  });
 
   return (
     <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full">
@@ -511,8 +549,18 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-emerald-800 bg-emerald-100 font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={refreshAllData}
+            disabled={isRefreshing}
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all border border-slate-700 disabled:opacity-50"
+            title="Sync live bookings, revenue, and customer records from Supabase"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-400' : 'text-slate-300'}`} />
+            <span>{isRefreshing ? 'Syncing...' : 'Live Sync DB'}</span>
+          </button>
+          <span className="text-xs text-emerald-800 bg-emerald-100 font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border border-emerald-200">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             Pakistani Gateways: Easypaisa • JazzCash • Raast
           </span>
@@ -1309,41 +1357,73 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
       {/* TAB: BOOKINGS STREAM (Admin Verified Bookings by Default) */}
       {activeTab === 'bookings' && (
         <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                <span>Verified Customer Reservations</span>
+                <span>Customer Bookings & Reservations</span>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  {confirmedBookingsCount} Verified
+                  {confirmedBookingsCount} Confirmed
                 </span>
+                {pendingDatabaseBookingsCount > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200">
+                    {pendingDatabaseBookingsCount} Pending
+                  </span>
+                )}
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Only bookings verified and approved by the admin are listed here. Unverified / pending holds are stored safely in the database and reviewed in the Payment Verification tab.
+                Real-time booking orders synchronized with Supabase database. Verified approvals update instantly.
               </p>
             </div>
 
-            {/* Filter Toggle: Verified Only vs All Database Holds */}
-            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl shrink-0">
-              <button
-                onClick={() => setBookingFilter('confirmed')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
-                  bookingFilter === 'confirmed'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Verified Only ({confirmedBookingsCount})
-              </button>
-              <button
-                onClick={() => setBookingFilter('all')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
-                  bookingFilter === 'all'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                All Database Holds ({bookingsList.length})
-              </button>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+              {/* Search Bar */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={bookingsSearch}
+                  onChange={(e) => setBookingsSearch(e.target.value)}
+                  placeholder="Search ref, traveler, email..."
+                  className="w-full sm:w-56 pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                />
+              </div>
+
+              {/* Filter Toggle: All vs Confirmed vs Pending */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setBookingFilter('confirmed')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
+                    bookingFilter === 'confirmed'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Confirmed ({confirmedBookingsCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBookingFilter('pending')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
+                    bookingFilter === 'pending'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Pending ({pendingDatabaseBookingsCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBookingFilter('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
+                    bookingFilter === 'all'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All ({bookingsList.length})
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1351,32 +1431,32 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-200">
                 <tr>
-                  <th className="py-3 px-4">Reference</th>
-                  <th className="py-3 px-4">Traveler</th>
-                  <th className="py-3 px-4">Tour</th>
+                  <th className="py-3 px-4">Booking Ref</th>
+                  <th className="py-3 px-4">Lead Traveler</th>
+                  <th className="py-3 px-4">Reserved Tour</th>
                   <th className="py-3 px-4">Departure Date</th>
                   <th className="py-3 px-4">Payment Method</th>
-                  <th className="py-3 px-4">Amount</th>
-                  <th className="py-3 px-4">Verification Status</th>
+                  <th className="py-3 px-4">Charged Amount</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {displayedBookings.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-400">
+                    <td colSpan={8} className="py-12 text-center text-slate-400">
                       <Calendar className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                       <span className="font-bold text-sm text-slate-700 block">
-                        {bookingFilter === 'confirmed' 
-                          ? 'No Admin-Verified Bookings Yet' 
-                          : 'No Reservations Found in Database'}
+                        {bookingsSearch ? 'No Bookings Match Your Search' : 'No Bookings in This View'}
                       </span>
                       <span className="text-xs text-slate-400 max-w-sm block mx-auto mt-1">
                         {bookingFilter === 'confirmed'
-                          ? 'Bookings appear here only after an admin verifies their payment receipt in the Payment Verification tab.'
-                          : 'Pending and confirmed customer reservations will show here.'}
+                          ? 'Confirm pending orders in the Payment Verification tab to see them here.'
+                          : 'Bookings placed on the website appear here instantly.'}
                       </span>
                       {pendingCount > 0 && bookingFilter === 'confirmed' && (
                         <button
+                          type="button"
                           onClick={() => setActiveTab('payments')}
                           className="mt-4 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs inline-flex items-center gap-1.5 transition-colors shadow-sm"
                         >
@@ -1389,31 +1469,91 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
                 ) : (
                   displayedBookings.map((b) => (
                     <tr key={b.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3 px-4 font-mono font-bold text-red-600">{b.reference}</td>
+                      <td className="py-3 px-4">
+                        <span className="font-mono font-bold text-red-600 block">{b.reference}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {b.createdAt ? new Date(b.createdAt).toLocaleDateString() : ''}
+                        </span>
+                      </td>
                       <td className="py-3 px-4">
                         <div className="font-bold text-slate-900">{b.customer}</div>
-                        <div className="text-[11px] text-slate-400">{b.nationality} • {b.email}</div>
+                        <div className="text-[11px] text-slate-500">{b.email}</div>
+                        {b.phone && <div className="text-[10px] text-slate-400 font-mono">{b.phone}</div>}
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {b.participants} {b.participants === 1 ? 'Traveler' : 'Travelers'} • {b.nationality}
+                        </div>
                       </td>
-                      <td className="py-3 px-4 font-medium text-slate-800 max-w-xs truncate">{b.tourTitle}</td>
-                      <td className="py-3 px-4 text-slate-600 font-medium">{b.date}</td>
+                      <td className="py-3 px-4 max-w-xs">
+                        <div className="font-bold text-slate-800 line-clamp-1">{b.tourTitle}</div>
+                        {b.tourSlug && (
+                          <Link
+                            href={`/tours/${b.tourSlug}`}
+                            target="_blank"
+                            className="text-[10px] text-red-600 font-bold hover:underline inline-flex items-center gap-0.5 mt-0.5"
+                          >
+                            <span>View Tour</span>
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </Link>
+                        )}
+                      </td>
                       <td className="py-3 px-4">
-                        <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono font-semibold">
+                        <div className="font-bold text-slate-800">{b.date}</div>
+                        <div className="text-[10px] text-slate-400">{b.time} JST</div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono font-bold text-[10px]">
                           {b.gateway}
                         </span>
                       </td>
-                      <td className="py-3 px-4 font-mono font-bold text-slate-900">
-                        {formatPrice(b.amountJpy)}
+                      <td className="py-3 px-4">
+                        <div className="font-mono font-bold text-slate-900">
+                          ¥{b.amountJpy.toLocaleString()} JPY
+                        </div>
+                        {b.chargedAmountPkr > 0 && (
+                          <div className="text-[11px] font-mono font-bold text-emerald-600">
+                            PKR {b.chargedAmountPkr.toLocaleString()}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 px-4">
-                        <span className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] uppercase ${
+                        <span className={`px-2.5 py-1 rounded-full font-bold text-[10px] uppercase inline-flex items-center gap-1 ${
                           b.status === 'Confirmed' 
                             ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
                             : b.status === 'Hold Pending'
                             ? 'bg-amber-100 text-amber-800 border border-amber-200'
                             : 'bg-slate-100 text-slate-700'
                         }`}>
-                          {b.status === 'Confirmed' ? '✓ Verified / Confirmed' : b.status}
+                          {b.status === 'Confirmed' && <Check className="w-3 h-3 text-emerald-600" />}
+                          {b.status === 'Hold Pending' && <Clock className="w-3 h-3 text-amber-600" />}
+                          <span>{b.status === 'Confirmed' ? 'Confirmed' : b.status}</span>
                         </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenBookingReceipt(b)}
+                            className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] inline-flex items-center gap-1 transition-colors shadow-sm"
+                            title="View or print official receipt voucher"
+                          >
+                            <FileText className="w-3 h-3 text-emerald-400" />
+                            <span>Receipt</span>
+                          </button>
+                          {b.rawStatus === 'hold_pending_payment' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPaymentSearch(b.reference);
+                                setActiveTab('payments');
+                              }}
+                              className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[10px] inline-flex items-center gap-1 transition-colors shadow-sm"
+                              title="Go to payment verification for this booking"
+                            >
+                              <Clock className="w-3 h-3" />
+                              <span>Verify</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -1427,44 +1567,87 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
       {/* TAB: CUSTOMERS */}
       {activeTab === 'customers' && (
         <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-100">
-            <h3 className="text-base font-extrabold text-slate-900">
-              Registered International Travelers ({customers.length})
-            </h3>
-            <p className="text-xs text-slate-500">
-              Customer profiles registered across USA, UK, Europe, UAE, Pakistan, and Japan
-            </p>
+          <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <span>Traveler Directory</span>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">
+                  {customers.length} Profiles
+                </span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Real customer accounts & bookers with live spending and completed tours count.
+              </p>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-200">
                 <tr>
-                  <th className="py-3 px-4">Customer Name</th>
-                  <th className="py-3 px-4">Email</th>
-                  <th className="py-3 px-4">Country</th>
-                  <th className="py-3 px-4">Completed Bookings</th>
-                  <th className="py-3 px-4">Lifetime Value</th>
-                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Traveler Name</th>
+                  <th className="py-3 px-4">Email & Phone</th>
+                  <th className="py-3 px-4">Account Type</th>
+                  <th className="py-3 px-4">Bookings</th>
+                  <th className="py-3 px-4">Total Spent</th>
+                  <th className="py-3 px-4">Last Activity</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {customers.map((c, i) => (
-                  <tr key={i} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3 px-4 font-bold text-slate-900">{c.name}</td>
-                    <td className="py-3 px-4 text-slate-600">{c.email}</td>
-                    <td className="py-3 px-4 font-medium text-slate-800">{c.country}</td>
-                    <td className="py-3 px-4 font-bold text-slate-900">{c.bookings} Tours</td>
-                    <td className="py-3 px-4 font-mono font-bold text-slate-900">{formatPrice(c.spentJpy)}</td>
-                    <td className="py-3 px-4">
-                      <span className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] uppercase ${
-                        c.status === 'VIP' ? 'bg-purple-100 text-purple-800' : 'bg-slate-100 text-slate-700'
-                      }`}>
-                        {c.status}
-                      </span>
+                {customers.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-10 text-center text-slate-400">
+                      No traveler profiles recorded yet.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  customers.map((c, i) => (
+                    <tr key={c.id || i} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3 px-4 font-bold text-slate-900">
+                        <div>{c.name}</div>
+                        <div className="text-[10px] text-slate-400 font-normal">{c.country}</div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="text-slate-700 font-medium">{c.email}</div>
+                        {c.phone && <div className="text-[11px] text-slate-400 font-mono">{c.phone}</div>}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] uppercase ${
+                          c.role === 'admin'
+                            ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                            : c.isRegistered
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-blue-100 text-blue-800 border border-blue-200'
+                        }`}>
+                          {c.role === 'admin' ? 'Admin' : c.isRegistered ? 'Registered User' : 'Guest Booker'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="font-bold text-slate-900">
+                          {c.confirmedBookings || 0} Confirmed
+                        </span>
+                        {c.bookings > (c.confirmedBookings || 0) && (
+                          <span className="text-[10px] text-slate-400 block">
+                            ({c.bookings} total requests)
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="font-mono font-bold text-slate-900">
+                          {c.spentPkr > 0 ? `PKR ${c.spentPkr.toLocaleString()}` : formatPrice(c.spentJpy || 0)}
+                        </div>
+                        {c.spentJpy > 0 && (
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            ¥{c.spentJpy.toLocaleString()} JPY
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-slate-600 font-medium">
+                        {c.lastBookingDate || 'N/A'}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
