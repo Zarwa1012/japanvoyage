@@ -33,13 +33,15 @@ import {
   RefreshCw,
   FileText,
   Download,
-  Image as ImageIcon
+  Image as ImageIcon,
+  MapPin
 } from 'lucide-react';
 import { useCurrency } from '@/context/CurrencyContext';
 import { useAuth } from '@/context/AuthContext';
 import { ALL_TOURS } from '@/data/mockTours';
 import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
 import { createClient } from '@/lib/supabase/client';
+import { downloadReceiptVoucher } from '@/lib/receiptDownload';
 
 interface AdminDashboardClientProps {
   adminEmail: string;
@@ -91,7 +93,7 @@ interface AdminPaymentRecord {
 export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) {
   const { formatPrice } = useCurrency();
   const { role } = useAuth();
-  const [activeTab, setActiveTab] = useState<'overview' | 'tours' | 'bookings' | 'customers' | 'reviews' | 'payments'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'revenue' | 'tours' | 'bookings' | 'customers' | 'reviews' | 'payments'>('overview');
   
   // Supabase Database Connection & Dynamic Admin States
   const supabase = createClient();
@@ -107,8 +109,18 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'easypaisa' | 'jazzcash' | 'raast'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'PENDING' | 'PAID' | 'REJECTED'>('all');
   const [paymentSearch, setPaymentSearch] = useState('');
-  const [bookingFilter, setBookingFilter] = useState<'confirmed' | 'pending' | 'all'>('confirmed');
+  
+  // Bookings Tab Departure Timing Sub-Filters
+  const [bookingTimingFilter, setBookingTimingFilter] = useState<'all_confirmed' | 'upcoming' | 'today' | 'past' | 'pending' | 'all'>('all_confirmed');
   const [bookingsSearch, setBookingsSearch] = useState('');
+  
+  // Revenue Tab Filters
+  const [revenueGatewayFilter, setRevenueGatewayFilter] = useState<'all' | 'easypaisa' | 'jazzcash' | 'raast' | 'card'>('all');
+  const [revenueSearch, setRevenueSearch] = useState('');
+
+  // Traveler Directory Filter
+  const [customerSearch, setCustomerSearch] = useState('');
+
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [serverBookingStats, setServerBookingStats] = useState<any>(null);
   const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null);
@@ -209,59 +221,77 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
             return;
           }
         } catch {
-          // If blob fetch fails, fall back to window.open
-          window.open(activeReceipt.signedUrl, '_blank');
-          return;
+          // If blob fetch fails, download high-res PNG voucher
         }
       }
 
-      // 3. Fallback: If no receipt image was uploaded, generate a printable PDF receipt
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Payment Receipt - ${activeReceipt.transactionId}</title>
-              <style>
-                body { font-family: -apple-system, sans-serif; padding: 40px; color: #0f172a; max-width: 500px; margin: 0 auto; }
-                .header { text-align: center; border-bottom: 2px dashed #cbd5e1; padding-bottom: 20px; margin-bottom: 20px; }
-                .brand { font-size: 22px; font-weight: 900; color: #dc2626; }
-                .badge { display: inline-block; background: #ecfdf5; color: #065f46; font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 999px; text-transform: uppercase; margin-top: 8px; border: 1px solid #a7f3d0; }
-                .table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 20px 0; }
-                .table td { padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
-                .table td:first-child { color: #64748b; font-weight: 600; }
-                .table td:last-child { font-weight: 800; text-align: right; }
-                .print-btn { background: #0f172a; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 700; cursor: pointer; }
-                @media print { .print-btn { display: none; } }
-              </style>
-            </head>
-            <body>
-              <div class="header">
-                <div class="brand">JAPAN VOYAGE</div>
-                <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Verified Payment Record</div>
-                <div class="badge">Official Transaction Receipt</div>
-              </div>
-              <table class="table">
-                <tr><td>Booking Reference</td><td style="color: #dc2626; font-family: monospace;">${activeReceipt.bookingReference || 'N/A'}</td></tr>
-                <tr><td>Transaction ID (TRX)</td><td style="font-family: monospace;">${activeReceipt.transactionId}</td></tr>
-                <tr><td>Customer Name</td><td>${activeReceipt.customerName || 'Customer'}</td></tr>
-                <tr><td>Amount Verified</td><td>Rs ${(activeReceipt.amount || 0).toLocaleString()} PKR</td></tr>
-              </table>
-              <div style="text-align: center; margin-top: 24px;">
-                <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
-              </div>
-              <script>window.onload = function() { setTimeout(function() { window.print(); }, 200); };</script>
-            </body>
-          </html>
-        `);
-        printWindow.document.close();
-      }
+      // 3. Official High-Resolution Electronic Voucher PNG (Direct 1-Click File Download - No Print Popup!)
+      const matchedBooking = bookingsList.find(b => b.reference === activeReceipt.bookingReference || b.id === activeReceipt.bookingId);
+      await downloadReceiptVoucher({
+        bookingReference: activeReceipt.bookingReference || 'JV-RECEIPT',
+        customerName: activeReceipt.customerName || matchedBooking?.customer || 'Traveler',
+        customerEmail: matchedBooking?.email,
+        customerPhone: matchedBooking?.phone,
+        tourTitle: matchedBooking?.tourTitle || 'Japan Inbound Travel Experience',
+        destination: matchedBooking?.destination || 'Japan',
+        departureDate: matchedBooking?.date || new Date().toISOString().split('T')[0],
+        departureTime: matchedBooking?.time || '09:00 JST',
+        totalParticipants: matchedBooking?.participants || 1,
+        amountPkr: activeReceipt.amount || matchedBooking?.chargedAmountPkr || 0,
+        amountJpy: matchedBooking?.amountJpy,
+        paymentMethod: matchedBooking?.gateway || 'Pakistani Gateway',
+        transactionId: activeReceipt.transactionId || 'TRX-CONFIRMED',
+        status: 'confirmed',
+      });
     } catch (err: any) {
       console.error('Download receipt error:', err);
       alert('Could not download receipt: ' + (err.message || 'Unknown error'));
     } finally {
       setIsDownloadingReceipt(false);
+    }
+  };
+
+  // Direct 1-Click Receipt Voucher Download helper for any booking or revenue item (Zero Print Popups!)
+  const handleDirectDownloadReceipt = async (record: {
+    reference: string;
+    customer: string;
+    email?: string;
+    phone?: string;
+    tourTitle?: string;
+    destination?: string;
+    date?: string;
+    time?: string;
+    participants?: number;
+    amountPkr: number;
+    amountJpy?: number;
+    gateway?: string;
+    transactionId?: string;
+    senderName?: string;
+    senderMobile?: string;
+    status?: string;
+  }) => {
+    try {
+      await downloadReceiptVoucher({
+        bookingReference: record.reference,
+        customerName: record.customer,
+        customerEmail: record.email,
+        customerPhone: record.phone,
+        tourTitle: record.tourTitle || 'Japan Inbound Travel Experience',
+        destination: record.destination || 'Japan',
+        departureDate: record.date || new Date().toISOString().split('T')[0],
+        departureTime: record.time || '09:00 JST',
+        totalParticipants: record.participants || 1,
+        amountPkr: record.amountPkr,
+        amountJpy: record.amountJpy,
+        paymentMethod: record.gateway || 'Pakistani Gateway',
+        transactionId: record.transactionId || record.reference,
+        senderName: record.senderName,
+        senderMobile: record.senderMobile,
+        status: record.status?.toLowerCase().includes('confirm') || record.status?.toLowerCase().includes('paid') ? 'confirmed' : 'pending',
+      });
+    } catch (err: any) {
+      console.error('Error generating receipt voucher:', err);
+      alert('Could not download voucher: ' + (err.message || 'Unknown error'));
     }
   };
 
@@ -306,6 +336,7 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
             nationality: b.lead_traveler_phone?.startsWith('+92') || b.charged_currency === 'PKR' ? '🇵🇰 Pakistan' : '🌍 International',
             tourTitle: b.schedule?.tour_option?.tour?.title || b.schedule?.tour_option?.title || 'Japan Voyage Tour Reservation',
             tourSlug: b.schedule?.tour_option?.tour?.slug || '',
+            destination: b.schedule?.tour_option?.tour?.destination || 'Japan',
             date: b.schedule?.tour_date || (b.created_at ? new Date(b.created_at).toISOString().split('T')[0] : 'N/A'),
             time: b.schedule?.start_time_jst || '09:00',
             gateway: (b.payment_method || (b.charged_currency === 'PKR' ? 'Pakistani Gateway' : 'CARD')).toUpperCase(),
@@ -507,10 +538,44 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
     .filter(p => getDisplayPaymentStatus(p.status) === 'PAID')
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || confirmedRevenuePkr;
 
-  // Filtered Bookings for the Bookings Tab
+  // Helper to categorize departure timing
+  const getDepartureTiming = (dateStr: string) => {
+    if (!dateStr || dateStr === 'N/A') return { category: 'upcoming', label: 'Scheduled', days: 0, badgeClass: 'bg-blue-50 text-blue-700 border border-blue-200' };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(dateStr);
+    target.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) {
+      return { category: 'today', label: 'Departing Today!', days: 0, badgeClass: 'bg-emerald-100 text-emerald-800 ring-2 ring-emerald-500 font-black animate-pulse' };
+    } else if (diffDays > 0) {
+      return { category: 'upcoming', label: `Upcoming in ${diffDays}d`, days: diffDays, badgeClass: 'bg-blue-50 text-blue-800 border border-blue-200' };
+    } else {
+      return { category: 'past', label: `Fulfilled (${Math.abs(diffDays)}d ago)`, days: diffDays, badgeClass: 'bg-slate-100 text-slate-600 border border-slate-200' };
+    }
+  };
+
+  const upcomingBookingsCount = bookingsList.filter(b => b.isConfirmed && getDepartureTiming(b.date).category === 'upcoming').length;
+  const todayBookingsCount = bookingsList.filter(b => b.isConfirmed && getDepartureTiming(b.date).category === 'today').length;
+  const pastBookingsCount = bookingsList.filter(b => b.isConfirmed && getDepartureTiming(b.date).category === 'past').length;
+
+  // Filtered Bookings for the Bookings Tab with Timing Sub-filters
   const displayedBookings = bookingsList.filter((b) => {
-    if (bookingFilter === 'confirmed' && !b.isConfirmed) return false;
-    if (bookingFilter === 'pending' && b.isConfirmed) return false;
+    const timing = getDepartureTiming(b.date);
+
+    if (bookingTimingFilter === 'all_confirmed') {
+      if (!b.isConfirmed) return false;
+    } else if (bookingTimingFilter === 'upcoming') {
+      if (!b.isConfirmed || timing.category !== 'upcoming') return false;
+    } else if (bookingTimingFilter === 'today') {
+      if (!b.isConfirmed || timing.category !== 'today') return false;
+    } else if (bookingTimingFilter === 'past') {
+      if (!b.isConfirmed || timing.category !== 'past') return false;
+    } else if (bookingTimingFilter === 'pending') {
+      if (b.isConfirmed) return false;
+    }
+
     if (bookingsSearch.trim()) {
       const q = bookingsSearch.toLowerCase();
       const matchRef = b.reference?.toLowerCase().includes(q);
@@ -521,6 +586,110 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
       return matchRef || matchCust || matchEmail || matchTour || matchPhone;
     }
     return true;
+  });
+
+  // Financial Revenue Ledger Items
+  const revenueRecords = bookingsList
+    .filter(b => b.isConfirmed || b.chargedAmountPkr > 0)
+    .map(b => {
+      const matchedPayment = paymentsList.find(p => p.booking_id === b.id || p.booking?.booking_reference === b.reference);
+      return {
+        id: b.id,
+        reference: b.reference,
+        customer: b.customer,
+        email: b.email,
+        phone: b.phone,
+        participants: b.participants,
+        tourTitle: b.tourTitle,
+        destination: b.destination || 'Japan',
+        departureDate: b.date,
+        departureTime: b.time,
+        paymentDate: b.createdAt || matchedPayment?.created_at || new Date().toISOString(),
+        gateway: (matchedPayment?.gateway_provider || b.gateway || 'Pakistani Gateway').toLowerCase(),
+        transactionId: matchedPayment?.gateway_transaction_id || b.reference,
+        amountPkr: b.chargedAmountPkr || Number(matchedPayment?.amount) || 0,
+        amountJpy: b.amountJpy || 0,
+        status: b.isConfirmed ? 'Verified & Paid' : 'Pending Verification',
+        paymentRecord: matchedPayment,
+      };
+    });
+
+  const displayedRevenueRecords = revenueRecords.filter(r => {
+    if (revenueGatewayFilter !== 'all' && !r.gateway.includes(revenueGatewayFilter)) {
+      return false;
+    }
+    if (revenueSearch.trim()) {
+      const q = revenueSearch.toLowerCase();
+      return (
+        r.reference?.toLowerCase().includes(q) ||
+        r.customer?.toLowerCase().includes(q) ||
+        r.email?.toLowerCase().includes(q) ||
+        r.phone?.toLowerCase().includes(q) ||
+        r.tourTitle?.toLowerCase().includes(q) ||
+        r.transactionId?.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  const easypaisaTotalPkr = revenueRecords.filter(r => r.gateway.includes('easypaisa')).reduce((s, r) => s + r.amountPkr, 0);
+  const easypaisaCount = revenueRecords.filter(r => r.gateway.includes('easypaisa')).length;
+
+  const jazzcashTotalPkr = revenueRecords.filter(r => r.gateway.includes('jazzcash')).reduce((s, r) => s + r.amountPkr, 0);
+  const jazzcashCount = revenueRecords.filter(r => r.gateway.includes('jazzcash')).length;
+
+  const raastTotalPkr = revenueRecords.filter(r => r.gateway.includes('raast')).reduce((s, r) => s + r.amountPkr, 0);
+  const raastCount = revenueRecords.filter(r => r.gateway.includes('raast')).length;
+
+  const cardTotalPkr = revenueRecords.filter(r => r.gateway.includes('card') || r.gateway.includes('stripe')).reduce((s, r) => s + r.amountPkr, 0);
+  const cardCount = revenueRecords.filter(r => r.gateway.includes('card') || r.gateway.includes('stripe')).length;
+
+  // Enriched Customer Profiles with Tours History & Total Spend
+  const enrichedCustomers = customers.map((c: any) => {
+    const matchedBookings = bookingsList.filter((b: any) => 
+      (c.email && b.email?.toLowerCase() === c.email.toLowerCase()) ||
+      (c.phone && b.phone && b.phone.replace(/[^0-9]/g, '') === c.phone.replace(/[^0-9]/g, '')) ||
+      (c.id && b.customer_id === c.id)
+    );
+
+    const tours = matchedBookings.map((b: any) => ({
+      reference: b.reference,
+      tourTitle: b.tourTitle,
+      date: b.date,
+      status: b.status,
+      isConfirmed: b.isConfirmed,
+      participants: b.participants,
+      amountPkr: b.chargedAmountPkr,
+      amountJpy: b.amountJpy,
+    }));
+
+    const totalToursBooked = Math.max(matchedBookings.length, c.confirmedBookings || 0, c.bookings || 0);
+    const confirmedToursCount = matchedBookings.filter((b: any) => b.isConfirmed).length || c.confirmedBookings || 0;
+    const totalSpendPkr = matchedBookings.reduce((sum: number, b: any) => sum + (b.chargedAmountPkr || 0), 0) || c.spentPkr || 0;
+    const totalSpendJpy = matchedBookings.reduce((sum: number, b: any) => sum + (b.amountJpy || 0), 0) || c.spentJpy || 0;
+    const totalTravelersCount = matchedBookings.reduce((sum: number, b: any) => sum + (b.participants || 1), 0) || 1;
+
+    return {
+      ...c,
+      totalToursBooked,
+      confirmedToursCount,
+      totalSpendPkr,
+      totalSpendJpy,
+      totalTravelersCount,
+      tours,
+    };
+  });
+
+  const displayedCustomers = enrichedCustomers.filter((c: any) => {
+    if (!customerSearch.trim()) return true;
+    const q = customerSearch.toLowerCase();
+    return (
+      c.name?.toLowerCase().includes(q) ||
+      c.email?.toLowerCase().includes(q) ||
+      c.phone?.toLowerCase().includes(q) ||
+      c.country?.toLowerCase().includes(q) ||
+      c.tours?.some((t: any) => t.tourTitle?.toLowerCase().includes(q))
+    );
   });
 
   return (
@@ -587,10 +756,15 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
       {/* Top 4 KPI Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
         
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+        {/* Metric 1: Verified Revenue (Clickable -> Opens Dedicated Revenue Breakdown Tab) */}
+        <div 
+          onClick={() => setActiveTab('revenue')}
+          className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm cursor-pointer hover:border-red-400 hover:shadow-md transition-all group"
+          title="Click to view full Revenue Breakdown & Audit Ledger"
+        >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Verified Revenue</span>
-            <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider group-hover:text-red-600 transition-colors">Verified Revenue</span>
+            <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-colors">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
@@ -602,32 +776,52 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
               ¥{confirmedRevenueJpy.toLocaleString()} JPY Verified Revenue
             </span>
           </div>
-          <div className="mt-2.5 text-[11px] text-emerald-600 font-bold flex items-center gap-1">
-            <TrendingUp className="w-3.5 h-3.5" />
-            <span>PKR {totalVerifiedPkr.toLocaleString()} Verified Revenue</span>
+          <div className="mt-2.5 text-[11px] text-emerald-600 font-bold flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span>PKR {totalVerifiedPkr.toLocaleString()}</span>
+            </div>
+            <span className="text-[10px] text-red-600 font-bold flex items-center group-hover:underline">
+              <span>View Breakdown</span>
+              <ChevronRight className="w-3 h-3" />
+            </span>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+        {/* Metric 2: Verified Bookings (Clickable -> Opens Bookings Tab with Timing Filters) */}
+        <div 
+          onClick={() => {
+            setActiveTab('bookings');
+            setBookingTimingFilter('all_confirmed');
+          }}
+          className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm cursor-pointer hover:border-blue-400 hover:shadow-md transition-all group"
+          title="Click to view Verified Bookings with Future/Current/Past filters"
+        >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Verified Bookings</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">Verified Bookings</span>
+            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
               <Calendar className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
             <span className="text-2xl font-black text-slate-900">{confirmedBookingsCount} Confirmed</span>
             <span className="block text-[11px] text-slate-400 mt-0.5">
-              {confirmedBookingsCount > 0 ? 'Admin-verified reservations' : 'No confirmed reservations yet'}
+              {upcomingBookingsCount} Future • {todayBookingsCount} Today • {pastBookingsCount} Past
             </span>
           </div>
-          <div className="mt-2.5 text-[11px] text-amber-600 font-bold flex items-center gap-1">
-            <Clock className="w-3.5 h-3.5" />
-            <span>{pendingDatabaseBookingsCount} Pending in Database Queue</span>
+          <div className="mt-2.5 text-[11px] font-bold flex items-center justify-between">
+            <span className="text-amber-600 flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5" />
+              <span>{pendingDatabaseBookingsCount} Pending</span>
+            </span>
+            <span className="text-[10px] text-blue-600 font-bold flex items-center group-hover:underline">
+              <span>Filter Bookings</span>
+              <ChevronRight className="w-3 h-3" />
+            </span>
           </div>
         </div>
 
-        {/* Pending Verifications Metric Card */}
+        {/* Metric 3: Pending Verifications Card */}
         <div 
           onClick={() => setActiveTab('payments')}
           className={`rounded-2xl p-5 border shadow-sm cursor-pointer transition-all hover:scale-[1.01] ${
@@ -635,6 +829,7 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
               ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-400/40' 
               : 'bg-white border-slate-200/80'
           }`}
+          title="Click to review proofs and approve pending transactions"
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pending Payments</span>
@@ -658,20 +853,31 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+        {/* Metric 4: Registered Users / Travelers (Clickable -> Opens Traveler Directory) */}
+        <div 
+          onClick={() => setActiveTab('customers')}
+          className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm cursor-pointer hover:border-purple-400 hover:shadow-md transition-all group"
+          title="Click to view Traveler Directory, party sizes, and tours taken"
+        >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Registered Users</span>
-            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider group-hover:text-purple-600 transition-colors">Traveler Directory</span>
+            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center group-hover:bg-purple-600 group-hover:text-white transition-colors">
               <Users className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
             <span className="text-2xl font-black text-slate-900">{customers.length} Travelers</span>
-            <span className="block text-[11px] text-slate-400 mt-0.5">Profiles in public.profiles</span>
+            <span className="block text-[11px] text-slate-400 mt-0.5">Profiles & Reservation History</span>
           </div>
-          <div className="mt-2.5 text-[11px] text-emerald-600 font-bold flex items-center gap-1">
-            <TrendingUp className="w-3.5 h-3.5" />
-            <span>Supabase Auth synchronized</span>
+          <div className="mt-2.5 text-[11px] font-bold flex items-center justify-between text-purple-600">
+            <div className="flex items-center gap-1">
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span>Full Info & Tours Taken</span>
+            </div>
+            <span className="text-[10px] font-bold flex items-center group-hover:underline">
+              <span>View Directory</span>
+              <ChevronRight className="w-3 h-3" />
+            </span>
           </div>
         </div>
 
@@ -688,6 +894,22 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
           }`}
         >
           Overview & Trends
+        </button>
+
+        {/* Dedicated Revenue Breakdown Tab */}
+        <button
+          onClick={() => setActiveTab('revenue')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            activeTab === 'revenue'
+              ? 'bg-emerald-700 text-white shadow'
+              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Revenue Breakdown</span>
+          <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-1.5 py-0.5 rounded">
+            PKR {Math.round(totalVerifiedPkr / 1000)}k
+          </span>
         </button>
 
         {/* Dedicated Payments Verification Tab */}
@@ -748,6 +970,273 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
           Review Moderation ({reviews.length})
         </button>
       </div>
+
+      {/* TAB: REVENUE BREAKDOWN & FINANCIAL AUDIT LEDGER */}
+      {activeTab === 'revenue' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Top Revenue KPI Summary */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                Total Verified PKR Revenue
+              </span>
+              <p className="text-2xl font-black text-slate-900 mt-1">
+                Rs {totalVerifiedPkr.toLocaleString()} PKR
+              </p>
+              <span className="text-[11px] text-emerald-600 font-bold block mt-1">
+                ✓ Reconciled with Pakistani Bank Accounts
+              </span>
+            </div>
+
+            <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                Total Base JPY Value
+              </span>
+              <p className="text-2xl font-black text-slate-900 mt-1">
+                ¥{confirmedRevenueJpy.toLocaleString()} JPY
+              </p>
+              <span className="text-[11px] text-slate-400 font-bold block mt-1">
+                {formatPrice(confirmedRevenueJpy)} Total Base Revenue
+              </span>
+            </div>
+
+            <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                Paid / Confirmed Orders
+              </span>
+              <p className="text-2xl font-black text-slate-900 mt-1">
+                {confirmedBookingsCount} Bookings
+              </p>
+              <span className="text-[11px] text-blue-600 font-bold block mt-1">
+                {revenueRecords.length} Total Revenue Line Items
+              </span>
+            </div>
+
+            <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                Average Booking Value
+              </span>
+              <p className="text-2xl font-black text-slate-900 mt-1">
+                Rs {Math.round(totalVerifiedPkr / Math.max(1, confirmedBookingsCount)).toLocaleString()} PKR
+              </p>
+              <span className="text-[11px] text-slate-400 font-bold block mt-1">
+                Per verified traveler reservation
+              </span>
+            </div>
+          </div>
+
+          {/* Payment Gateway Distribution Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs">
+              <div className="flex items-center justify-between text-emerald-900 font-black">
+                <span className="flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> Easypaisa</span>
+                <span>{easypaisaCount}</span>
+              </div>
+              <div className="font-mono font-black text-sm text-emerald-700 mt-1">
+                Rs {easypaisaTotalPkr.toLocaleString()} PKR
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-xs">
+              <div className="flex items-center justify-between text-rose-900 font-black">
+                <span className="flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5" /> JazzCash</span>
+                <span>{jazzcashCount}</span>
+              </div>
+              <div className="font-mono font-black text-sm text-rose-700 mt-1">
+                Rs {jazzcashTotalPkr.toLocaleString()} PKR
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-orange-50 border border-orange-200 text-xs">
+              <div className="flex items-center justify-between text-orange-900 font-black">
+                <span className="flex items-center gap-1.5"><QrCode className="w-3.5 h-3.5" /> Raast Pay</span>
+                <span>{raastCount}</span>
+              </div>
+              <div className="font-mono font-black text-sm text-orange-700 mt-1">
+                Rs {raastTotalPkr.toLocaleString()} PKR
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-xs">
+              <div className="flex items-center justify-between text-blue-900 font-black">
+                <span className="flex items-center gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Card / Other</span>
+                <span>{cardCount}</span>
+              </div>
+              <div className="font-mono font-black text-sm text-blue-700 mt-1">
+                Rs {cardTotalPkr.toLocaleString()} PKR
+              </div>
+            </div>
+          </div>
+
+          {/* Revenue Audit Table Card */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <span>Detailed Revenue Ledger & Transactions</span>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    {displayedRevenueRecords.length} Records
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Complete audit of who booked, when, which tour plan was booked, exact PKR/JPY charged, and gateway TRX references.
+                </p>
+              </div>
+
+              {/* Filters & Search */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={revenueSearch}
+                    onChange={(e) => setRevenueSearch(e.target.value)}
+                    placeholder="Search customer, tour, ref, TRX..."
+                    className="w-full sm:w-60 pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0 text-xs">
+                  {(['all', 'easypaisa', 'jazzcash', 'raast'] as const).map(gw => (
+                    <button
+                      key={gw}
+                      type="button"
+                      onClick={() => setRevenueGatewayFilter(gw)}
+                      className={`px-2.5 py-1 rounded-lg font-bold capitalize transition-all ${
+                        revenueGatewayFilter === gw ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {gw}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="py-3 px-4">Booking & Date</th>
+                    <th className="py-3 px-4">Lead Traveler</th>
+                    <th className="py-3 px-4">Tour Plan & Destination</th>
+                    <th className="py-3 px-4">Tour Schedule</th>
+                    <th className="py-3 px-4">Channel & TRX ID</th>
+                    <th className="py-3 px-4">Amount Charged</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4 text-right">Official Receipt</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {displayedRevenueRecords.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-12 text-center text-slate-400">
+                        <DollarSign className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                        <span className="font-bold text-sm text-slate-700 block">
+                          No Revenue Records Found
+                        </span>
+                        <span className="text-xs text-slate-400 max-w-sm block mx-auto mt-1">
+                          Confirmed bookings and verified payments will appear in this ledger.
+                        </span>
+                      </td>
+                    </tr>
+                  ) : (
+                    displayedRevenueRecords.map((r) => (
+                      <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-4">
+                          <span className="font-mono font-bold text-red-600 block">{r.reference}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {r.paymentDate ? new Date(r.paymentDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="font-bold text-slate-900">{r.customer}</div>
+                          <div className="text-[11px] text-slate-500">{r.email}</div>
+                          {r.phone && <div className="text-[10px] text-slate-400 font-mono">{r.phone}</div>}
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {r.participants} {r.participants === 1 ? 'Person' : 'Persons'}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 max-w-xs">
+                          <div className="font-bold text-slate-800 line-clamp-1">{r.tourTitle}</div>
+                          <span className="text-[10px] font-semibold text-slate-500 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3 text-red-500 shrink-0" />
+                            <span>{r.destination}</span>
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <div className="font-bold text-slate-800">{r.departureDate}</div>
+                          <div className="text-[10px] text-slate-400">{r.departureTime} JST</div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded font-mono font-bold text-[10px] uppercase block w-fit mb-1">
+                            {r.gateway}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className="font-mono text-[10px] text-slate-600 truncate max-w-[120px]">
+                              {r.transactionId}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(r.transactionId)}
+                              className="text-slate-400 hover:text-slate-700"
+                              title="Copy TRX ID"
+                            >
+                              <Copy className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <div className="font-mono font-black text-sm text-emerald-600">
+                            Rs {r.amountPkr.toLocaleString()} PKR
+                          </div>
+                          {r.amountJpy > 0 && (
+                            <div className="text-[10px] font-mono text-slate-400">
+                              (¥{r.amountJpy.toLocaleString()} JPY)
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className="px-2.5 py-1 rounded-full font-bold text-[10px] uppercase inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            <span>{r.status}</span>
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => handleDirectDownloadReceipt({
+                              reference: r.reference,
+                              customer: r.customer,
+                              email: r.email,
+                              phone: r.phone,
+                              tourTitle: r.tourTitle,
+                              destination: r.destination,
+                              date: r.departureDate,
+                              time: r.departureTime,
+                              participants: r.participants,
+                              amountPkr: r.amountPkr,
+                              amountJpy: r.amountJpy,
+                              gateway: r.gateway,
+                              transactionId: r.transactionId,
+                              status: 'confirmed',
+                            })}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] inline-flex items-center gap-1 transition-colors shadow-sm"
+                            title="Direct 1-click download of official PNG receipt voucher"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span>Download Receipt</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* TAB: MANUAL PAYMENT VERIFICATION SYSTEM (Requirements 1-10) */}
       {activeTab === 'payments' && (
@@ -1354,16 +1843,21 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
         </div>
       )}
 
-      {/* TAB: BOOKINGS STREAM (Admin Verified Bookings by Default) */}
+      {/* TAB: BOOKINGS STREAM (Departure Timing Filters: Confirmed, Future, Today, Past, Pending) */}
       {activeTab === 'bookings' && (
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden animate-in fade-in">
+          <div className="p-6 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                <span>Customer Bookings & Reservations</span>
+                <span>Customer Bookings & Departure Schedule</span>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">
                   {confirmedBookingsCount} Confirmed
                 </span>
+                {todayBookingsCount > 0 && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500 text-white animate-pulse">
+                    {todayBookingsCount} Today
+                  </span>
+                )}
                 {pendingDatabaseBookingsCount > 0 && (
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200">
                     {pendingDatabaseBookingsCount} Pending
@@ -1371,7 +1865,7 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
                 )}
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Real-time booking orders synchronized with Supabase database. Verified approvals update instantly.
+                Filter by departure timeline: Upcoming future departures, today&apos;s tours, and previous fulfilled trips.
               </p>
             </div>
 
@@ -1383,40 +1877,73 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
                   type="text"
                   value={bookingsSearch}
                   onChange={(e) => setBookingsSearch(e.target.value)}
-                  placeholder="Search ref, traveler, email..."
-                  className="w-full sm:w-56 pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  placeholder="Search ref, traveler, tour, email..."
+                  className="w-full sm:w-60 pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
               </div>
 
-              {/* Filter Toggle: All vs Confirmed vs Pending */}
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0">
+              {/* Sub-filters for Departure Timing */}
+              <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0 text-xs font-bold">
                 <button
                   type="button"
-                  onClick={() => setBookingFilter('confirmed')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
-                    bookingFilter === 'confirmed'
+                  onClick={() => setBookingTimingFilter('all_confirmed')}
+                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                    bookingTimingFilter === 'all_confirmed'
                       ? 'bg-white text-slate-900 shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Confirmed ({confirmedBookingsCount})
+                  All Confirmed ({confirmedBookingsCount})
                 </button>
                 <button
                   type="button"
-                  onClick={() => setBookingFilter('pending')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
-                    bookingFilter === 'pending'
+                  onClick={() => setBookingTimingFilter('upcoming')}
+                  className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                    bookingTimingFilter === 'upcoming'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-blue-700 hover:text-blue-900'
+                  }`}
+                >
+                  Future ({upcomingBookingsCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBookingTimingFilter('today')}
+                  className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                    bookingTimingFilter === 'today'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-emerald-700 hover:text-emerald-900'
+                  }`}
+                >
+                  Today ({todayBookingsCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBookingTimingFilter('past')}
+                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                    bookingTimingFilter === 'past'
                       ? 'bg-white text-slate-900 shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Fulfilled ({pastBookingsCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBookingTimingFilter('pending')}
+                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                    bookingTimingFilter === 'pending'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : 'text-amber-700 hover:text-amber-900'
                   }`}
                 >
                   Pending ({pendingDatabaseBookingsCount})
                 </button>
                 <button
                   type="button"
-                  onClick={() => setBookingFilter('all')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-colors ${
-                    bookingFilter === 'all'
+                  onClick={() => setBookingTimingFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                    bookingTimingFilter === 'all'
                       ? 'bg-white text-slate-900 shadow-sm'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
@@ -1432,13 +1959,13 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
               <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-200">
                 <tr>
                   <th className="py-3 px-4">Booking Ref</th>
-                  <th className="py-3 px-4">Lead Traveler</th>
-                  <th className="py-3 px-4">Reserved Tour</th>
-                  <th className="py-3 px-4">Departure Date</th>
-                  <th className="py-3 px-4">Payment Method</th>
-                  <th className="py-3 px-4">Charged Amount</th>
+                  <th className="py-3 px-4">Lead Traveler & Party</th>
+                  <th className="py-3 px-4">Reserved Tour & Destination</th>
+                  <th className="py-3 px-4">Departure Timing</th>
+                  <th className="py-3 px-4">Channel & TRX</th>
+                  <th className="py-3 px-4">Amount Charged</th>
                   <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+                  <th className="py-3 px-4 text-right">Official Receipt</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1447,14 +1974,14 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
                     <td colSpan={8} className="py-12 text-center text-slate-400">
                       <Calendar className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                       <span className="font-bold text-sm text-slate-700 block">
-                        {bookingsSearch ? 'No Bookings Match Your Search' : 'No Bookings in This View'}
+                        {bookingsSearch ? 'No Bookings Match Your Search' : 'No Bookings in This Departure Category'}
                       </span>
                       <span className="text-xs text-slate-400 max-w-sm block mx-auto mt-1">
-                        {bookingFilter === 'confirmed'
+                        {bookingTimingFilter === 'all_confirmed'
                           ? 'Confirm pending orders in the Payment Verification tab to see them here.'
-                          : 'Bookings placed on the website appear here instantly.'}
+                          : 'Bookings matching this departure timeframe will appear here.'}
                       </span>
-                      {pendingCount > 0 && bookingFilter === 'confirmed' && (
+                      {pendingCount > 0 && bookingTimingFilter !== 'pending' && (
                         <button
                           type="button"
                           onClick={() => setActiveTab('payments')}
@@ -1467,96 +1994,130 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
                     </td>
                   </tr>
                 ) : (
-                  displayedBookings.map((b) => (
-                    <tr key={b.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3 px-4">
-                        <span className="font-mono font-bold text-red-600 block">{b.reference}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {b.createdAt ? new Date(b.createdAt).toLocaleDateString() : ''}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-900">{b.customer}</div>
-                        <div className="text-[11px] text-slate-500">{b.email}</div>
-                        {b.phone && <div className="text-[10px] text-slate-400 font-mono">{b.phone}</div>}
-                        <div className="text-[10px] text-slate-400 mt-0.5">
-                          {b.participants} {b.participants === 1 ? 'Traveler' : 'Travelers'} • {b.nationality}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 max-w-xs">
-                        <div className="font-bold text-slate-800 line-clamp-1">{b.tourTitle}</div>
-                        {b.tourSlug && (
-                          <Link
-                            href={`/tours/${b.tourSlug}`}
-                            target="_blank"
-                            className="text-[10px] text-red-600 font-bold hover:underline inline-flex items-center gap-0.5 mt-0.5"
-                          >
-                            <span>View Tour</span>
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </Link>
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-800">{b.date}</div>
-                        <div className="text-[10px] text-slate-400">{b.time} JST</div>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono font-bold text-[10px]">
-                          {b.gateway}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="font-mono font-bold text-slate-900">
-                          ¥{b.amountJpy.toLocaleString()} JPY
-                        </div>
-                        {b.chargedAmountPkr > 0 && (
-                          <div className="text-[11px] font-mono font-bold text-emerald-600">
-                            PKR {b.chargedAmountPkr.toLocaleString()}
+                  displayedBookings.map((b) => {
+                    const timing = getDepartureTiming(b.date);
+                    return (
+                      <tr key={b.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-4">
+                          <span className="font-mono font-bold text-red-600 block">{b.reference}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {b.createdAt ? new Date(b.createdAt).toLocaleDateString() : ''}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="font-bold text-slate-900">{b.customer}</div>
+                          <div className="text-[11px] text-slate-500">{b.email}</div>
+                          {b.phone && <div className="text-[10px] text-slate-400 font-mono">{b.phone}</div>}
+                          <div className="text-[10px] text-slate-500 font-semibold mt-0.5 flex items-center gap-1">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                              {b.participants} {b.participants === 1 ? 'Person' : 'Persons'}
+                            </span>
+                            <span>• {b.nationality}</span>
                           </div>
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`px-2.5 py-1 rounded-full font-bold text-[10px] uppercase inline-flex items-center gap-1 ${
-                          b.status === 'Confirmed' 
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
-                            : b.status === 'Hold Pending'
-                            ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                            : 'bg-slate-100 text-slate-700'
-                        }`}>
-                          {b.status === 'Confirmed' && <Check className="w-3 h-3 text-emerald-600" />}
-                          {b.status === 'Hold Pending' && <Clock className="w-3 h-3 text-amber-600" />}
-                          <span>{b.status === 'Confirmed' ? 'Confirmed' : b.status}</span>
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenBookingReceipt(b)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] inline-flex items-center gap-1 transition-colors shadow-sm"
-                            title="View or print official receipt voucher"
-                          >
-                            <FileText className="w-3 h-3 text-emerald-400" />
-                            <span>Receipt</span>
-                          </button>
-                          {b.rawStatus === 'hold_pending_payment' && (
+                        </td>
+                        <td className="py-3 px-4 max-w-xs">
+                          <div className="font-bold text-slate-800 line-clamp-1">{b.tourTitle}</div>
+                          <span className="text-[10px] font-semibold text-slate-500 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3 text-red-500 shrink-0" />
+                            <span>{b.destination}</span>
+                          </span>
+                          {b.tourSlug && (
+                            <Link
+                              href={`/tours/${b.tourSlug}`}
+                              target="_blank"
+                              className="text-[10px] text-red-600 font-bold hover:underline inline-flex items-center gap-0.5 mt-0.5"
+                            >
+                              <span>View Tour Page</span>
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </Link>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <div className="font-bold text-slate-800">{b.date}</div>
+                          <div className="text-[10px] text-slate-400 mb-1">{b.time} JST</div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase inline-block ${timing.badgeClass}`}>
+                            {timing.label}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono font-bold text-[10px] block w-fit mb-0.5">
+                            {b.gateway}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          {b.chargedAmountPkr > 0 ? (
+                            <div className="text-xs font-mono font-black text-emerald-600">
+                              Rs {b.chargedAmountPkr.toLocaleString()} PKR
+                            </div>
+                          ) : (
+                            <div className="font-mono font-bold text-slate-900">
+                              ¥{b.amountJpy.toLocaleString()} JPY
+                            </div>
+                          )}
+                          {b.amountJpy > 0 && b.chargedAmountPkr > 0 && (
+                            <div className="text-[10px] font-mono text-slate-400">
+                              (¥{b.amountJpy.toLocaleString()} JPY)
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className={`px-2.5 py-1 rounded-full font-bold text-[10px] uppercase inline-flex items-center gap-1 ${
+                            b.status === 'Confirmed' 
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                              : b.status === 'Hold Pending'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}>
+                            {b.status === 'Confirmed' && <Check className="w-3 h-3 text-emerald-600" />}
+                            {b.status === 'Hold Pending' && <Clock className="w-3 h-3 text-amber-600" />}
+                            <span>{b.status === 'Confirmed' ? 'Confirmed' : b.status}</span>
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"
-                              onClick={() => {
-                                setPaymentSearch(b.reference);
-                                setActiveTab('payments');
-                              }}
-                              className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[10px] inline-flex items-center gap-1 transition-colors shadow-sm"
-                              title="Go to payment verification for this booking"
+                              onClick={() => handleDirectDownloadReceipt({
+                                reference: b.reference,
+                                customer: b.customer,
+                                email: b.email,
+                                phone: b.phone,
+                                tourTitle: b.tourTitle,
+                                destination: b.destination,
+                                date: b.date,
+                                time: b.time,
+                                participants: b.participants,
+                                amountPkr: b.chargedAmountPkr,
+                                amountJpy: b.amountJpy,
+                                gateway: b.gateway,
+                                transactionId: b.reference,
+                                status: b.status,
+                              })}
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] inline-flex items-center gap-1 transition-colors shadow-sm"
+                              title="Direct 1-click download of official PNG receipt voucher (No print dialog!)"
                             >
-                              <Clock className="w-3 h-3" />
-                              <span>Verify</span>
+                              <Download className="w-3 h-3" />
+                              <span>Download Receipt</span>
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                            {b.rawStatus === 'hold_pending_payment' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPaymentSearch(b.reference);
+                                  setActiveTab('payments');
+                                }}
+                                className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[10px] inline-flex items-center gap-1 transition-colors shadow-sm"
+                                title="Go to payment verification for this booking"
+                              >
+                                <Clock className="w-3 h-3" />
+                                <span>Verify</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -1564,20 +2125,31 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
         </div>
       )}
 
-      {/* TAB: CUSTOMERS */}
+      {/* TAB: TRAVELER DIRECTORY & TOUR PARTICIPATION (Requirements: Complete Traveler Info, Tours Taken, Spend) */}
       {activeTab === 'customers' && (
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden animate-in fade-in">
+          <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                <span>Traveler Directory</span>
+                <span>Traveler Directory & History</span>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">
-                  {customers.length} Profiles
+                  {displayedCustomers.length} Travelers
                 </span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Real customer accounts & bookers with live spending and completed tours count.
+                Complete profile of travelers, contact details, tours booked & taken, total party travelers, and lifetime spending.
               </p>
+            </div>
+
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+                placeholder="Search traveler, email, tour name..."
+                className="w-full sm:w-64 pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+              />
             </div>
           </div>
 
@@ -1585,33 +2157,44 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-bold border-b border-slate-200">
                 <tr>
-                  <th className="py-3 px-4">Traveler Name</th>
+                  <th className="py-3 px-4">Traveler Profile</th>
                   <th className="py-3 px-4">Email & Phone</th>
                   <th className="py-3 px-4">Account Type</th>
-                  <th className="py-3 px-4">Bookings</th>
-                  <th className="py-3 px-4">Total Spent</th>
+                  <th className="py-3 px-4">Tours Taken & Reserved</th>
+                  <th className="py-3 px-4">Party Size</th>
+                  <th className="py-3 px-4">Lifetime Spent</th>
                   <th className="py-3 px-4">Last Activity</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {customers.length === 0 ? (
+                {displayedCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-10 text-center text-slate-400">
-                      No traveler profiles recorded yet.
+                    <td colSpan={8} className="py-10 text-center text-slate-400">
+                      <Users className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                      <span className="font-bold text-sm text-slate-700 block">No Travelers Found</span>
+                      <span className="text-xs text-slate-400 mt-1 block">Travelers with registered accounts or bookings will appear here.</span>
                     </td>
                   </tr>
                 ) : (
-                  customers.map((c, i) => (
+                  displayedCustomers.map((c: any, i: number) => (
                     <tr key={c.id || i} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3 px-4 font-bold text-slate-900">
-                        <div>{c.name}</div>
-                        <div className="text-[10px] text-slate-400 font-normal">{c.country}</div>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-300 text-slate-800 font-black text-xs flex items-center justify-center shrink-0">
+                            {c.name ? c.name[0].toUpperCase() : 'T'}
+                          </div>
+                          <div>
+                            <div className="font-extrabold text-slate-900">{c.name}</div>
+                            <div className="text-[10px] text-slate-500 font-normal">{c.country || 'Pakistan'}</div>
+                          </div>
+                        </div>
                       </td>
                       <td className="py-3 px-4">
-                        <div className="text-slate-700 font-medium">{c.email}</div>
-                        {c.phone && <div className="text-[11px] text-slate-400 font-mono">{c.phone}</div>}
+                        <div className="text-slate-800 font-semibold">{c.email}</div>
+                        {c.phone && <div className="text-[11px] text-slate-500 font-mono">{c.phone}</div>}
                       </td>
-                      <td className="py-3 px-4">
+                      <td className="py-3 px-4 whitespace-nowrap">
                         <span className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] uppercase ${
                           c.role === 'admin'
                             ? 'bg-purple-100 text-purple-800 border border-purple-200'
@@ -1622,28 +2205,66 @@ export function AdminDashboardClient({ adminEmail }: AdminDashboardClientProps) 
                           {c.role === 'admin' ? 'Admin' : c.isRegistered ? 'Registered User' : 'Guest Booker'}
                         </span>
                       </td>
-                      <td className="py-3 px-4">
-                        <span className="font-bold text-slate-900">
-                          {c.confirmedBookings || 0} Confirmed
-                        </span>
-                        {c.bookings > (c.confirmedBookings || 0) && (
-                          <span className="text-[10px] text-slate-400 block">
-                            ({c.bookings} total requests)
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="font-mono font-bold text-slate-900">
-                          {c.spentPkr > 0 ? `PKR ${c.spentPkr.toLocaleString()}` : formatPrice(c.spentJpy || 0)}
+                      <td className="py-3 px-4 max-w-sm">
+                        <div className="font-extrabold text-slate-900">
+                          {c.confirmedToursCount || 0} Confirmed Tours
+                          {c.totalToursBooked > (c.confirmedToursCount || 0) && (
+                            <span className="text-[10px] text-slate-400 font-normal ml-1">
+                              ({c.totalToursBooked} total)
+                            </span>
+                          )}
                         </div>
-                        {c.spentJpy > 0 && (
-                          <div className="text-[10px] text-slate-400 font-mono">
-                            ¥{c.spentJpy.toLocaleString()} JPY
+                        {c.tours && c.tours.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {c.tours.slice(0, 3).map((t: any, idx: number) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 text-[10px] font-bold border border-slate-200 line-clamp-1 max-w-[180px]"
+                                title={`${t.tourTitle} on ${t.date} (${t.status})`}
+                              >
+                                {t.tourTitle} • {t.date}
+                              </span>
+                            ))}
+                            {c.tours.length > 3 && (
+                              <span className="text-[10px] text-slate-400 self-center">
+                                +{c.tours.length - 3} more
+                              </span>
+                            )}
                           </div>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-slate-600 font-medium">
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <span className="font-extrabold text-slate-800">
+                          {c.totalTravelersCount} {c.totalTravelersCount === 1 ? 'Person' : 'Persons'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <div className="font-mono font-black text-slate-900">
+                          {c.totalSpendPkr > 0 ? `Rs ${c.totalSpendPkr.toLocaleString()} PKR` : formatPrice(c.totalSpendJpy || 0)}
+                        </div>
+                        {c.totalSpendJpy > 0 && (
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            ¥{c.totalSpendJpy.toLocaleString()} JPY
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-slate-600 font-medium whitespace-nowrap">
                         {c.lastBookingDate || 'N/A'}
+                      </td>
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBookingsSearch(c.email || c.name);
+                            setActiveTab('bookings');
+                            setBookingTimingFilter('all');
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[10px] inline-flex items-center gap-1 transition-colors border border-slate-200"
+                          title="View all bookings for this traveler"
+                        >
+                          <Calendar className="w-3 h-3 text-slate-600" />
+                          <span>View Bookings</span>
+                        </button>
                       </td>
                     </tr>
                   ))

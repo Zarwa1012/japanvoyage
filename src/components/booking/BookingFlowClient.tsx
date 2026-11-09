@@ -36,6 +36,7 @@ import { useCurrency } from '@/context/CurrencyContext';
 import { useAuth } from '@/context/AuthContext';
 import { ImageWithFallback } from '@/components/ui/ImageWithFallback';
 import { PAKISTANI_PAYMENT_METHODS } from '@/config/paymentMethods';
+import { downloadReceiptVoucher } from '@/lib/receiptDownload';
 
 interface BookingFlowClientProps {
   tour: MockTour;
@@ -159,71 +160,38 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
     setTimeout(() => setCopiedField(null), 2500);
   };
 
-  const handleDownloadBookingReceipt = () => {
+  const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
+
+  const handleDownloadBookingReceipt = async () => {
     if (!bookingHold) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert('Please allow popups to download your receipt.');
-      return;
+    setIsDownloadingReceipt(true);
+    try {
+      await downloadReceiptVoucher({
+        bookingReference: bookingHold.reference,
+        customerName: `${leadTraveler.firstName} ${leadTraveler.lastName}`.trim() || senderName || 'Traveler',
+        customerEmail: leadTraveler.email,
+        customerPhone: leadTraveler.phoneNumber || senderMobile,
+        tourTitle: tour.title,
+        destination: tour.destination,
+        departureDate: travelDate,
+        departureTime: '09:00 JST',
+        totalParticipants: adults + children,
+        adults,
+        children,
+        amountPkr: totalAmountPkr,
+        amountJpy: totalAmountJpy,
+        paymentMethod,
+        transactionId: transactionId || 'Logged',
+        senderName: senderName || `${leadTraveler.firstName} ${leadTraveler.lastName}`.trim(),
+        senderMobile: senderMobile || leadTraveler.phoneNumber,
+        status: isVerificationSubmitted ? 'pending' : 'hold',
+      });
+    } catch (err: any) {
+      console.error('Download receipt error:', err);
+      alert('Could not download receipt: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsDownloadingReceipt(false);
     }
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Japan Voyage Payment Receipt - ${bookingHold.reference}</title>
-          <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #0f172a; max-width: 600px; margin: 0 auto; line-height: 1.5; }
-            .header { text-align: center; border-bottom: 2px dashed #cbd5e1; padding-bottom: 24px; margin-bottom: 24px; }
-            .brand { font-size: 26px; font-weight: 900; color: #dc2626; }
-            .badge { display: inline-block; background: #ecfdf5; color: #065f46; font-size: 11px; font-weight: 800; padding: 4px 14px; border-radius: 9999px; text-transform: uppercase; margin-top: 8px; border: 1px solid #a7f3d0; }
-            .ref-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; text-align: center; margin-bottom: 24px; }
-            .ref { font-family: monospace; font-size: 22px; font-weight: 900; color: #dc2626; letter-spacing: 1px; }
-            .details { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; }
-            .details td { padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
-            .details td:first-child { color: #64748b; font-weight: 600; width: 40%; }
-            .details td:last-child { font-weight: 700; text-align: right; color: #0f172a; }
-            .footer { text-align: center; color: #94a3b8; font-size: 11px; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px; }
-            .print-btn { background: #0f172a; color: white; border: none; padding: 12px 28px; border-radius: 10px; font-weight: 800; font-size: 13px; cursor: pointer; }
-            @media print { body { padding: 0; } .print-btn-container { display: none; } }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="brand">JAPAN VOYAGE</div>
-            <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Official Payment & Reservation Receipt</div>
-            <div class="badge">Payment Proof Received • Under Finance Verification</div>
-          </div>
-          <div class="ref-box">
-            <div style="font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 800; letter-spacing: 1px;">Booking Reference</div>
-            <div class="ref">${bookingHold.reference}</div>
-            <div style="font-size: 13px; color: #475569; margin-top: 6px; font-weight: 600;">${adults + children} Travelers • Travel Date: ${travelDate}</div>
-          </div>
-          <table class="details">
-            <tr><td>Tour Title</td><td>${tour.title}</td></tr>
-            <tr><td>Total Amount Sent</td><td style="color: #059669; font-weight: 800;">Rs ${totalAmountPkr.toLocaleString()} PKR (${formatPrice(totalAmountJpy)})</td></tr>
-            <tr><td>Payment Channel</td><td style="text-transform: uppercase;">${paymentMethod}</td></tr>
-            <tr><td>Transaction ID (TRX / TID)</td><td style="font-family: monospace;">${transactionId || 'Logged'}</td></tr>
-            <tr><td>Sender Account Title</td><td>${senderName}</td></tr>
-            <tr><td>Sender Mobile</td><td>${senderMobile}</td></tr>
-            <tr><td>Verification Status</td><td style="color: #d97706; font-weight: 800;">Pending Finance Desk Review (5-15 mins)</td></tr>
-            <tr><td>Customer Support</td><td>+92 324 6465916 / info@japanvoyage.com</td></tr>
-          </table>
-          <div class="print-btn-container" style="text-align: center; margin: 28px 0;">
-            <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
-          </div>
-          <div class="footer">
-            Japan Voyage Tours • Keep this receipt for your records • Present your booking reference upon boarding.
-          </div>
-          <script>
-            window.onload = function() {
-              setTimeout(function() { window.print(); }, 250);
-            };
-          </script>
-        </body>
-      </html>
-    `;
-    printWindow.document.write(html);
-    printWindow.document.close();
   };
 
   // Compress images in the browser so mobile photos (5MB-12MB) never exceed server limits
@@ -504,7 +472,7 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
         {/* VIEW 2: PAYMENT & VERIFICATION SCREEN (ACTIVE ONCE SEATS ARE HELD)       */}
         {/* ========================================================================= */}
         {bookingHold ? (
-          <div className="max-w-3xl mx-auto space-y-6">
+          <div className={`${isVerificationSubmitted ? 'max-w-3xl' : 'max-w-5xl'} mx-auto space-y-6 transition-all duration-300`}>
             
             {/* If Payment Verification is Submitted: Dedicated Full Confirmation Screen */}
             {isVerificationSubmitted ? (
@@ -595,10 +563,20 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
                     <button
                       type="button"
                       onClick={handleDownloadBookingReceipt}
-                      className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm px-6 py-4 rounded-xl shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center gap-2"
+                      disabled={isDownloadingReceipt}
+                      className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm px-6 py-4 rounded-xl shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                     >
-                      <Download className="w-4 h-4" />
-                      <span>Download Payment Receipt</span>
+                      {isDownloadingReceipt ? (
+                        <>
+                          <Clock className="w-4 h-4 animate-spin" />
+                          <span>Generating Official Receipt...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          <span>Download Payment Receipt</span>
+                        </>
+                      )}
                     </button>
                     <Link
                       href="/account"
@@ -631,402 +609,435 @@ export function BookingFlowClient({ tour }: BookingFlowClientProps) {
               </div>
             ) : (
               <>
-                {/* Countdown / Hold Header */}
-                <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl text-center">
-                  <div className="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <Timer className="w-8 h-8 stroke-[2.5]" />
-                  </div>
-
-                  <div className="flex items-center justify-center gap-2">
-                    <span className="text-xs font-extrabold uppercase tracking-widest px-3 py-1 rounded-full text-red-700 bg-red-50 border border-red-200">
-                      Seat Hold Active (15 Min)
-                    </span>
-                  </div>
-
-                  <h1 className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
-                    Complete Your Payment Transfer
-                  </h1>
-                  
-                  <p className="text-xs sm:text-sm text-slate-600 mt-1.5 max-w-lg mx-auto">
-                    Seats are temporarily held for booking <strong>{bookingHold.reference}</strong>. Send the exact PKR amount using your selected Pakistani payment method below.
-                  </p>
-
-                  <div className="mt-4 inline-flex items-center gap-2 bg-amber-50 text-amber-900 px-4 py-2 rounded-xl border border-amber-200 text-xs font-bold">
-                    <Clock className="w-4 h-4 text-amber-600" />
-                    <span>Time Remaining: </span>
-                    <span className="font-mono text-sm font-black text-amber-700">{formatCountdown(secondsRemaining)}</span>
-                  </div>
-
-                  {/* Booking Snapshot */}
-                  <div className="mt-6 bg-slate-50 rounded-2xl p-4 sm:p-5 border border-slate-200 text-left grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-                    <div>
-                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Reference</span>
-                      <span className="font-mono text-sm font-black text-red-600">{bookingHold.reference}</span>
+                {/* Hold Status & Countdown Header */}
+                <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/90 shadow-xl">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center shrink-0">
+                        <Timer className="w-6 h-6 stroke-[2.5]" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full text-red-700 bg-red-50 border border-red-200">
+                            Seat Hold Active (15 Min)
+                          </span>
+                          <span className="text-xs font-mono font-black text-slate-700">
+                            Ref: {bookingHold.reference}
+                          </span>
+                        </div>
+                        <h1 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">
+                          Complete Your Payment Transfer
+                        </h1>
+                      </div>
                     </div>
+
+                    <div className="flex items-center gap-3 bg-amber-50 text-amber-900 px-4 py-2.5 rounded-2xl border border-amber-200 shrink-0">
+                      <Clock className="w-4 h-4 text-amber-600" />
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-amber-800 block">Time Remaining</span>
+                        <span className="font-mono text-base font-black text-amber-900 leading-none">
+                          {formatCountdown(secondsRemaining)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Bar */}
+                  <div className="mt-5 pt-4 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                     <div>
-                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Total Amount</span>
-                      <span className="font-black text-sm text-slate-900">Rs {totalAmountPkr.toLocaleString()} PKR</span>
-                      <span className="text-[10px] text-slate-400 block font-normal">({formatPrice(totalAmountJpy)})</span>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Tour Experience</span>
+                      <span className="font-extrabold text-slate-800 line-clamp-1">{tour.title}</span>
                     </div>
                     <div>
                       <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Travel Date</span>
                       <span className="font-bold text-slate-800">{travelDate}</span>
                     </div>
                     <div>
-                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Travelers</span>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Party Size</span>
                       <span className="font-bold text-slate-800">{adults + children} Persons</span>
                     </div>
-                  </div>
-                </div>
-
-              /* ========================================================================= */
-              /* PAYMENT INSTRUCTIONS & VERIFICATION SUBMISSION FORM                      */
-              /* ========================================================================= */
-              <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-xl space-y-8">
-                
-                {/* Method Switcher Tabs */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
-                    Select Transfer Channel:
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(['easypaisa', 'jazzcash', 'raast'] as const).map((methodKey) => {
-                      const cfg = PAKISTANI_PAYMENT_METHODS[methodKey];
-                      const isSelected = paymentMethod === methodKey;
-                      return (
-                        <button
-                          key={methodKey}
-                          type="button"
-                          onClick={() => setPaymentMethod(methodKey)}
-                          className={`py-3 px-3 rounded-xl border text-center transition-all flex flex-col items-center justify-center ${
-                            isSelected
-                              ? 'border-red-600 bg-red-50/60 ring-2 ring-red-600 shadow-sm'
-                              : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
-                          }`}
-                        >
-                          <span className="font-black text-xs text-slate-900">{cfg.name}</span>
-                          <span className="text-[10px] text-slate-400 block mt-0.5">{cfg.badge}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Account Details Box */}
-                <div className={`p-5 rounded-2xl border ${activePaymentConfig.lightBg} ${activePaymentConfig.borderColor} space-y-4`}>
-                  <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
-                    <div className="flex items-center gap-2">
-                      <Building2 className={`w-5 h-5 ${activePaymentConfig.textColor}`} />
-                      <span className={`font-black text-sm ${activePaymentConfig.textColor}`}>
-                        {activePaymentConfig.name} Transfer Information
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700">
-                      Official Account
-                    </span>
-                  </div>
-
-                  {/* Account Name */}
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 font-medium">Account Title:</span>
-                    <span className="font-extrabold text-slate-900">{activePaymentConfig.accountTitle}</span>
-                  </div>
-
-                  {/* Account Number with 1-Click Copy */}
-                  <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
                     <div>
-                      <span className="text-[10px] text-slate-400 font-bold block uppercase">
-                        {paymentMethod === 'raast' ? 'Raast ID / Alias' : 'Account Number'}
-                      </span>
-                      <span className="font-mono text-base font-black text-slate-900">
-                        {activePaymentConfig.accountNumber}
-                      </span>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Total Payable</span>
+                      <span className="font-black text-sm text-red-600">Rs {totalAmountPkr.toLocaleString()} PKR</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(activePaymentConfig.accountNumber, 'accNumber')}
-                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors"
-                    >
-                      {copiedField === 'accNumber' ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="text-emerald-700">Copied!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copy</span>
-                        </>
-                      )}
-                    </button>
                   </div>
+                </div>
 
-                  {/* IBAN for Raast */}
-                  {activePaymentConfig.iban && (
-                    <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
-                      <div>
-                        <span className="text-[10px] text-slate-400 font-bold block uppercase">Raast IBAN</span>
-                        <span className="font-mono text-xs font-black text-slate-900 break-all">
-                          {activePaymentConfig.iban}
+                {/* 2-Column Responsive Layout: Left = Official Account, Right = Submission Form */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  
+                  {/* Left Column (5 Cols): Payment Channel Details */}
+                  <div className="lg:col-span-5 bg-white rounded-3xl p-6 border border-slate-200/90 shadow-xl space-y-6">
+                    <div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-6 h-6 rounded-lg bg-slate-900 text-white font-black text-xs flex items-center justify-center">
+                          1
+                        </div>
+                        <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                          Select Transfer Channel
+                        </h3>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        {(['easypaisa', 'jazzcash', 'raast'] as const).map((methodKey) => {
+                          const cfg = PAKISTANI_PAYMENT_METHODS[methodKey];
+                          const isSelected = paymentMethod === methodKey;
+                          return (
+                            <button
+                              key={methodKey}
+                              type="button"
+                              onClick={() => setPaymentMethod(methodKey)}
+                              className={`py-3 px-2 rounded-xl border text-center transition-all flex flex-col items-center justify-center ${
+                                isSelected
+                                  ? 'border-red-600 bg-red-50/80 ring-2 ring-red-600 shadow-sm'
+                                  : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                              }`}
+                            >
+                              <span className="font-black text-xs text-slate-900">{cfg.name}</span>
+                              <span className="text-[10px] text-slate-500 block mt-0.5">{cfg.badge}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Official Account Details */}
+                    <div className={`p-4 rounded-2xl border ${activePaymentConfig.lightBg} ${activePaymentConfig.borderColor} space-y-3.5`}>
+                      <div className="flex items-center justify-between border-b border-slate-200/60 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <Building2 className={`w-4 h-4 ${activePaymentConfig.textColor}`} />
+                          <span className={`font-black text-xs ${activePaymentConfig.textColor}`}>
+                            {activePaymentConfig.name} Transfer Info
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700">
+                          Official Account
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleCopy(activePaymentConfig.iban!, 'iban')}
-                        className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors shrink-0 ml-2"
+
+                      {/* Account Title */}
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500 font-medium">Account Title:</span>
+                        <span className="font-extrabold text-slate-900">{activePaymentConfig.accountTitle}</span>
+                      </div>
+
+                      {/* Account Number with 1-Click Copy */}
+                      <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-bold block uppercase">
+                            {paymentMethod === 'raast' ? 'Raast ID / Alias' : 'Account Number'}
+                          </span>
+                          <span className="font-mono text-sm sm:text-base font-black text-slate-900">
+                            {activePaymentConfig.accountNumber}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(activePaymentConfig.accountNumber, 'accNumber')}
+                          className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors shrink-0"
+                        >
+                          {copiedField === 'accNumber' ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              <span className="text-emerald-700">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* IBAN for Raast */}
+                      {activePaymentConfig.iban && (
+                        <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
+                          <div className="overflow-hidden">
+                            <span className="text-[10px] text-slate-400 font-bold block uppercase">Raast IBAN</span>
+                            <span className="font-mono text-[11px] font-black text-slate-900 break-all">
+                              {activePaymentConfig.iban}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(activePaymentConfig.iban!, 'iban')}
+                            className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors shrink-0 ml-2"
+                          >
+                            {copiedField === 'iban' ? (
+                              <>
+                                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                <span className="text-emerald-700">Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5" />
+                                <span>Copy</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Exact Payable PKR */}
+                      <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-bold block uppercase">Exact Payable Amount</span>
+                          <span className="font-mono text-base font-black text-red-600">
+                            Rs {totalAmountPkr.toLocaleString()} PKR
+                          </span>
+                          <span className="text-[10px] text-slate-400 block font-normal">({formatPrice(totalAmountJpy)})</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(totalAmountPkr.toString(), 'amount')}
+                          className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors shrink-0"
+                        >
+                          {copiedField === 'amount' ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-600" />
+                              <span className="text-emerald-700">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Copy Amount</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Step Instructions */}
+                      <div className="text-xs text-slate-700 pt-1 space-y-1">
+                        <span className="font-bold text-slate-900 block text-[11px] uppercase tracking-wider">How to send:</span>
+                        <ol className="list-decimal list-inside space-y-1 text-slate-600 pl-0.5 text-[11px]">
+                          {activePaymentConfig.instructions.map((step, idx) => (
+                            <li key={idx} className="leading-relaxed">{step}</li>
+                          ))}
+                        </ol>
+                      </div>
+                    </div>
+
+                    {/* WhatsApp Desk Support */}
+                    <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-center">
+                      <a
+                        href="https://wa.me/923246465916"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800 hover:text-emerald-900 hover:underline"
                       >
-                        {copiedField === 'iban' ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
-                            <span className="text-emerald-700">Copied!</span>
-                          </>
+                        <span>Need live assistance? WhatsApp Desk (+92 324 6465916)</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Right Column (7 Cols): Payment Verification Form */}
+                  <div className="lg:col-span-7 bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/90 shadow-xl space-y-5">
+                    <form onSubmit={handleSubmitPaymentProof} className="space-y-4">
+                      <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                        <div className="w-6 h-6 rounded-lg bg-red-600 text-white font-black text-xs flex items-center justify-center">
+                          2
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
+                            Submit Transaction Verification
+                          </h3>
+                          <p className="text-[11px] text-slate-500">
+                            Enter sender details and TRX ID so the finance desk can approve your reservation.
+                          </p>
+                        </div>
+                      </div>
+
+                      {verificationError && (
+                        <div id="verification-error-top" className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2 animate-in fade-in">
+                          <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                          <span>{verificationError}</span>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        {/* Sender Name */}
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Sender Account Title / Name <span className="text-red-600">*</span>
+                          </label>
+                          <input
+                            id="senderNameInput"
+                            type="text"
+                            value={senderName}
+                            onChange={(e) => setSenderName(e.target.value)}
+                            placeholder="e.g. Muhammad Ali"
+                            required
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
+                          />
+                        </div>
+
+                        {/* Sender Mobile */}
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Sender Mobile Number <span className="text-red-600">*</span>
+                          </label>
+                          <input
+                            id="senderMobileInput"
+                            type="text"
+                            value={senderMobile}
+                            onChange={(e) => setSenderMobile(e.target.value)}
+                            placeholder="e.g. 0300-1234567"
+                            required
+                            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Transaction ID */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Transaction ID (TRX ID / TID / Reference Number) <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          id="transactionIdInput"
+                          type="text"
+                          value={transactionId}
+                          onChange={(e) => setTransactionId(e.target.value)}
+                          placeholder="e.g. 23849102941"
+                          required
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 font-mono text-sm font-bold focus:outline-none focus:ring-2 focus:ring-red-600"
+                        />
+                        <span className="text-[10px] text-slate-400 mt-1 block">
+                          Found in your SMS receipt or banking app transfer details.
+                        </span>
+                      </div>
+
+                      {/* Payment Receipt / Screenshot Upload (Image or PDF) */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Upload Payment Receipt (Image or PDF)
+                        </label>
+                        
+                        <div className="mt-1 flex justify-center px-4 pt-4 pb-5 border-2 border-slate-200 border-dashed rounded-2xl bg-slate-50 hover:bg-slate-100/70 transition-colors min-h-[120px] items-center">
+                          <div className="space-y-2 text-center w-full">
+                            {receiptFile || proofImageBase64 ? (
+                              <div className="flex flex-col items-center">
+                                {isReceiptPdf ? (
+                                  <div className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 shadow-sm max-w-sm w-full">
+                                    <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center shrink-0">
+                                      <FileText className="w-5 h-5 text-red-600" />
+                                    </div>
+                                    <div className="text-left overflow-hidden">
+                                      <p className="text-xs font-bold text-slate-900 truncate">
+                                        {proofFileName || 'Receipt.pdf'}
+                                      </p>
+                                      <p className="text-[10px] text-slate-500 font-mono">
+                                        PDF Document • {receiptFile ? `${Math.round(receiptFile.size / 1024)} KB` : 'Uploaded'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  proofImageBase64 && (
+                                    /* eslint-disable-next-line @next/next/no-img-element */
+                                    <img
+                                      src={proofImageBase64}
+                                      alt="Proof preview"
+                                      className="max-h-32 rounded-lg border border-slate-200 shadow-sm mb-1.5 object-contain"
+                                    />
+                                  )
+                                )}
+                                <span className="text-xs font-bold text-emerald-700 flex items-center gap-1 mt-1">
+                                  <FileCheck className="w-4 h-4 text-emerald-600" />
+                                  {proofFileName || 'Receipt selected'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReceiptFile(null);
+                                    setIsReceiptPdf(false);
+                                    setProofImageBase64(null);
+                                    setProofFileName(null);
+                                  }}
+                                  className="text-[11px] text-red-600 hover:underline font-bold mt-1"
+                                >
+                                  Remove & choose another
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <Upload className="mx-auto h-7 w-7 text-slate-400" />
+                                <div className="flex text-xs text-slate-600 justify-center">
+                                  <label
+                                    htmlFor="proof-upload"
+                                    className="relative cursor-pointer rounded-md font-extrabold text-red-600 hover:text-red-500 focus-within:outline-none"
+                                  >
+                                    <span>Upload payment screenshot or PDF receipt</span>
+                                    <input
+                                      id="proof-upload"
+                                      name="proof-upload"
+                                      type="file"
+                                      accept="image/png, image/jpeg, image/jpg, image/webp, application/pdf"
+                                      onChange={handleProofFileUpload}
+                                      className="sr-only"
+                                    />
+                                  </label>
+                                </div>
+                                <p className="text-[10px] text-slate-400">PNG, JPG, WEBP, or PDF up to 15MB</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Customer Notes */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Additional Notes for Finance Desk (Optional)
+                        </label>
+                        <textarea
+                          value={customerNotes}
+                          onChange={(e) => setCustomerNotes(e.target.value)}
+                          rows={2}
+                          placeholder="e.g. Sent from brother's Easypaisa account"
+                          className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-red-600"
+                        />
+                      </div>
+
+                      {/* Inline Error Notice directly above submit button */}
+                      {verificationError && (
+                        <div id="verification-error-bottom" className="p-3.5 rounded-xl bg-red-50 border-2 border-red-300 text-red-800 text-xs flex items-start gap-2.5 animate-in fade-in">
+                          <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                          <div className="space-y-0.5">
+                            <span className="font-bold text-xs block">Verification Details Required</span>
+                            <p>{verificationError}</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Submit Button */}
+                      <button
+                        type="submit"
+                        disabled={isSubmittingProof}
+                        className="w-full bg-red-600 hover:bg-red-700 active:scale-98 text-white font-extrabold text-xs sm:text-sm py-3.5 px-6 rounded-xl shadow-lg shadow-red-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {isSubmittingProof ? (
+                          <span className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 animate-spin" />
+                            <span>Verifying & Submitting Proof...</span>
+                          </span>
                         ) : (
                           <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copy</span>
+                            <ShieldCheck className="w-4 h-4" />
+                            <span>Submit Payment Proof for Verification</span>
                           </>
                         )}
                       </button>
-                    </div>
-                  )}
-
-                  {/* Exact PKR Amount */}
-                  <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Exact Payable Amount</span>
-                      <span className="font-mono text-base font-black text-red-600">
-                        Rs {totalAmountPkr.toLocaleString()} PKR
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(totalAmountPkr.toString(), 'amount')}
-                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors"
-                    >
-                      {copiedField === 'amount' ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="text-emerald-700">Copied!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copy Amount</span>
-                        </>
-                      )}
-                    </button>
+                    </form>
                   </div>
 
-                  {/* Step by Step Instructions */}
-                  <div className="text-xs text-slate-700 pt-2 space-y-1.5">
-                    <span className="font-bold text-slate-900 block">How to complete transfer:</span>
-                    <ol className="list-decimal list-inside space-y-1 text-slate-600 pl-1">
-                      {activePaymentConfig.instructions.map((step, idx) => (
-                        <li key={idx} className="leading-relaxed">{step}</li>
-                      ))}
-                    </ol>
-                  </div>
                 </div>
+              </>
+            )}
 
-                {/* Verification Form */}
-                <form onSubmit={handleSubmitPaymentProof} className="space-y-4 pt-2 border-t border-slate-200">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-red-600 text-white font-black text-xs flex items-center justify-center">
-                      2
-                    </div>
-                    <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
-                      Submit Your Transaction Verification
-                    </h3>
-                  </div>
-
-                  {verificationError && (
-                    <div id="verification-error-top" className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                      <span>{verificationError}</span>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Sender Full Name */}
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Sender Account Title / Name <span className="text-red-600">*</span>
-                      </label>
-                      <input
-                        id="senderNameInput"
-                        type="text"
-                        value={senderName}
-                        onChange={(e) => setSenderName(e.target.value)}
-                        placeholder="e.g. Muhammad Ali"
-                        required
-                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
-                      />
-                    </div>
-
-                    {/* Sender Mobile Number */}
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Sender Mobile Number <span className="text-red-600">*</span>
-                      </label>
-                      <input
-                        id="senderMobileInput"
-                        type="text"
-                        value={senderMobile}
-                        onChange={(e) => setSenderMobile(e.target.value)}
-                        placeholder="e.g. 0300-1234567"
-                        required
-                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-600"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Transaction ID */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Transaction ID (TRX ID / TID / Reference Number) <span className="text-red-600">*</span>
-                    </label>
-                    <input
-                      id="transactionIdInput"
-                      type="text"
-                      value={transactionId}
-                      onChange={(e) => setTransactionId(e.target.value)}
-                      placeholder="e.g. 23849102941"
-                      required
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 font-mono text-sm font-bold focus:outline-none focus:ring-2 focus:ring-red-600"
-                    />
-                    <span className="text-[11px] text-slate-400 mt-1 block">
-                      Found in your payment SMS receipt or mobile app transfer summary.
-                    </span>
-                  </div>
-
-                  {/* Payment Receipt / Screenshot Upload (Image or PDF) */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Upload Payment Receipt (Image or PDF)
-                    </label>
-                    
-                    <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-slate-200 border-dashed rounded-2xl bg-slate-50 hover:bg-slate-100/70 transition-colors">
-                      <div className="space-y-2 text-center w-full">
-                        {receiptFile || proofImageBase64 ? (
-                          <div className="flex flex-col items-center">
-                            {isReceiptPdf ? (
-                              <div className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-200 shadow-sm max-w-sm w-full">
-                                <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center shrink-0">
-                                  <FileText className="w-5 h-5 text-red-600" />
-                                </div>
-                                <div className="text-left overflow-hidden">
-                                  <p className="text-xs font-bold text-slate-900 truncate">
-                                    {proofFileName || 'Receipt.pdf'}
-                                  </p>
-                                  <p className="text-[10px] text-slate-500 font-mono">
-                                    PDF Document • {receiptFile ? `${Math.round(receiptFile.size / 1024)} KB` : 'Uploaded'}
-                                  </p>
-                                </div>
-                              </div>
-                            ) : (
-                              proofImageBase64 && (
-                                /* eslint-disable-next-line @next/next/no-img-element */
-                                <img
-                                  src={proofImageBase64}
-                                  alt="Proof preview"
-                                  className="max-h-36 rounded-lg border border-slate-200 shadow-sm mb-2"
-                                />
-                              )
-                            )}
-                            <span className="text-xs font-bold text-emerald-700 flex items-center gap-1 mt-2">
-                              <FileCheck className="w-4 h-4 text-emerald-600" />
-                              {proofFileName || 'Receipt selected'}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setReceiptFile(null);
-                                setIsReceiptPdf(false);
-                                setProofImageBase64(null);
-                                setProofFileName(null);
-                              }}
-                              className="text-[11px] text-red-600 hover:underline font-bold mt-1"
-                            >
-                              Remove & choose another
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <Upload className="mx-auto h-8 w-8 text-slate-400" />
-                            <div className="flex text-xs text-slate-600 justify-center">
-                              <label
-                                htmlFor="proof-upload"
-                                className="relative cursor-pointer rounded-md font-extrabold text-red-600 hover:text-red-500 focus-within:outline-none"
-                              >
-                                <span>Upload payment screenshot or PDF receipt</span>
-                                <input
-                                  id="proof-upload"
-                                  name="proof-upload"
-                                  type="file"
-                                  accept="image/png, image/jpeg, image/jpg, image/webp, application/pdf"
-                                  onChange={handleProofFileUpload}
-                                  className="sr-only"
-                                />
-                              </label>
-                            </div>
-                            <p className="text-[10px] text-slate-400">PNG, JPG, WEBP, or PDF up to 10MB</p>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Customer Notes */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Additional Notes for Finance Desk (Optional)
-                    </label>
-                    <textarea
-                      value={customerNotes}
-                      onChange={(e) => setCustomerNotes(e.target.value)}
-                      rows={2}
-                      placeholder="e.g. Sent from brother's Easypaisa account at 11:30 PM"
-                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-red-600"
-                    />
-                  </div>
-
-                  {/* Inline Error Notice directly above submit button */}
-                  {verificationError && (
-                    <div id="verification-error-bottom" className="p-4 rounded-xl bg-red-50 border-2 border-red-300 text-red-800 text-xs flex items-start gap-2.5 animate-in fade-in">
-                      <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-                      <div className="space-y-0.5">
-                        <span className="font-bold text-sm block">Verification Details Required</span>
-                        <p>{verificationError}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Submit Button */}
-                  <button
-                    type="submit"
-                    disabled={isSubmittingProof}
-                    className="w-full bg-red-600 hover:bg-red-700 active:scale-98 text-white font-extrabold text-xs sm:text-sm py-4 px-6 rounded-xl shadow-lg shadow-red-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    {isSubmittingProof ? (
-                      <span className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 animate-spin" />
-                        <span>Verifying & Submitting Proof...</span>
-                      </span>
-                    ) : (
-                      <>
-                        <ShieldCheck className="w-4 h-4" />
-                        <span>Submit Payment Proof for Verification</span>
-                      </>
-                    )}
-                  </button>
-                </form>
-
-              </div>
-            </>
-          )}
-
-        </div>
-      ) : (
+          </div>
+        ) : (
 
           /* ========================================================================= */
           /* VIEW 1: STANDARD CHECKOUT & PARTICIPANT DETAILS FORM                      */

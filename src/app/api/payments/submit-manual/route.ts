@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { uploadReceiptFile, ALLOWED_RECEIPT_MIME_TYPES } from '@/lib/supabase/storage';
+import { sendAdminPaymentProofNotification } from '@/lib/email';
 
 export async function POST(request: Request) {
   try {
@@ -91,18 +92,56 @@ export async function POST(request: Request) {
     const adminSupabase = createAdminClient();
 
     // 3. Verify associated booking exists (Requirement 7)
-    const { data: booking, error: bookingErr } = await adminSupabase
+    let { data: booking, error: bookingErr } = await adminSupabase
       .from('bookings')
-      .select('id, booking_reference, status, charged_amount, charged_currency')
+      .select(`
+        id,
+        booking_reference,
+        status,
+        charged_amount,
+        charged_currency,
+        total_base_amount,
+        lead_traveler_name,
+        lead_traveler_email,
+        lead_traveler_phone,
+        schedule:tour_schedules(
+          tour_date,
+          tour_option:tour_options(
+            title,
+            tour:tours(
+              title
+            )
+          )
+        )
+      `)
       .eq('id', bookingId)
       .single();
 
+    // Fallback query if joined schedule has any postgrest issue
     if (bookingErr || !booking) {
+      const basic = await adminSupabase
+        .from('bookings')
+        .select('*')
+        .eq('id', bookingId)
+        .single();
+
+      if (basic.error || !basic.data) {
+        return NextResponse.json(
+          { error: 'Associated booking reservation not found for the provided Booking ID.' },
+          { status: 404 }
+        );
+      }
+      booking = basic.data;
+    }
+
+    if (!booking) {
       return NextResponse.json(
         { error: 'Associated booking reservation not found for the provided Booking ID.' },
         { status: 404 }
       );
     }
+
+    const currentBooking = booking;
 
     // 4. Store receipt in Supabase Storage bucket 'payment-receipts' (Requirement 1, 2, 7, 8)
     let storedReceiptPath: string | null = fallbackImageUrl;
@@ -110,7 +149,7 @@ export async function POST(request: Request) {
     if (receiptFileBuffer) {
       try {
         const { filePath } = await uploadReceiptFile(adminSupabase, {
-          bookingId: booking.id,
+          bookingId: currentBooking.id,
           fileName: receiptFileName,
           mimeType: receiptMimeType,
           fileBuffer: receiptFileBuffer,
@@ -128,14 +167,14 @@ export async function POST(request: Request) {
     const cleanTrxId = transactionId.trim().toUpperCase();
     const cleanSenderName = senderName.trim();
     const cleanSenderMobile = senderMobile.trim();
-    const finalAmount = Number(amountPkr) || Number(booking.charged_amount) || 0;
+    const finalAmount = Number(amountPkr) || Number(currentBooking.charged_amount) || 0;
 
     // 5. Insert payment submission record with status PENDING_VERIFICATION (Requirement 2, 9)
     // NEVER automatically mark as PAID on receipt upload! Admin must manually review actual receipt.
     const { data: payment, error: paymentErr } = await adminSupabase
       .from('payments')
       .insert({
-        booking_id: booking.id,
+        booking_id: currentBooking.id,
         gateway_provider: paymentMethod.toLowerCase(),
         gateway_transaction_id: cleanTrxId,
         amount: finalAmount,
@@ -146,7 +185,7 @@ export async function POST(request: Request) {
         proof_image_url: storedReceiptPath,
         raw_payload: {
           customer_notes: customerNotes || null,
-          booking_reference: booking.booking_reference,
+          booking_reference: currentBooking.booking_reference,
           receipt_file_name: receiptFileName,
           receipt_mime_type: receiptMimeType,
           submitted_at: new Date().toISOString(),
@@ -171,7 +210,33 @@ export async function POST(request: Request) {
         status: 'hold_pending_payment',
         updated_at: new Date().toISOString(),
       })
-      .eq('id', booking.id);
+      .eq('id', currentBooking.id);
+
+    // 7. Dispatch automated alert email to Admin
+    try {
+      const tourTitle = (currentBooking as any).schedule?.tour_option?.tour?.title || (currentBooking as any).schedule?.tour_option?.title || 'Japan Voyage Tour';
+      const departureDate = (currentBooking as any).schedule?.tour_date || undefined;
+
+      await sendAdminPaymentProofNotification({
+        bookingReference: currentBooking.booking_reference,
+        bookingId: currentBooking.id,
+        customerName: cleanSenderName || (currentBooking as any).lead_traveler_name || 'Traveler',
+        customerEmail: (currentBooking as any).lead_traveler_email || undefined,
+        customerPhone: cleanSenderMobile || (currentBooking as any).lead_traveler_phone || undefined,
+        tourTitle,
+        departureDate,
+        amountPkr: finalAmount,
+        amountJpy: Number((currentBooking as any).total_base_amount) || undefined,
+        paymentMethod: paymentMethod.toLowerCase(),
+        transactionId: cleanTrxId,
+        senderName: cleanSenderName,
+        senderMobile: cleanSenderMobile,
+        customerNotes,
+        submittedAt: new Date().toISOString(),
+      });
+    } catch (emailErr) {
+      console.warn('Non-blocking error sending admin notification email:', emailErr);
+    }
 
     return NextResponse.json({
       success: true,
@@ -179,8 +244,8 @@ export async function POST(request: Request) {
       payment: {
         id: payment.id,
         status: 'pending_verification',
-        booking_id: booking.id,
-        booking_reference: booking.booking_reference,
+        booking_id: currentBooking.id,
+        booking_reference: currentBooking.booking_reference,
         receipt_path: storedReceiptPath,
         created_at: payment.created_at,
       },
